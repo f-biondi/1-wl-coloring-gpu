@@ -1,0 +1,6 @@
+[submodule "cpu_be/abseil-cpp"]
+	path = cpu_be/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git
+[submodule "cuda_be/abseil-cpp"]
+	path = cuda_be/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git
