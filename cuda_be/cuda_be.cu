@@ -211,6 +211,7 @@ int main(int argc, char* argv[]) {
         uint64_t first_edge_i = 0;
         uint64_t current_node = edge_start[0];
         unsigned char counting = 1;
+        z[z_c[edge_start[0]]] = 1;
 
         for(uint64_t i=0; i<edge_n; ++i) {
             if(i && edge_start[i] != current_node) {
