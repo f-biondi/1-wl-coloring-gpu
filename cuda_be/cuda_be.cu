@@ -98,7 +98,6 @@ int main(int argc, char* argv[]) {
     max_batch_edge_n = atoll(argv[2]); 
 
     CHECK_RESULT( read_file_graph(argv[1], &edge_start, &edge_end, &edge_weight, &edge_n, &node_n) );
-    uint64_t n = node_n;
 
     CHECK_ALLOC( w = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
     CHECK_ALLOC( z = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
