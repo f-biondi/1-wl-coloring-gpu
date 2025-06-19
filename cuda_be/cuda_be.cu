@@ -35,16 +35,10 @@
 
 using absl::flat_hash_map;
 
-int is_equivalent(uint64_t* w, uint64_t* z, uint64_t* z_c, unsigned char* batch_mask, uint64_t* new_node_n, uint64_t node_n);
+int is_equivalent(uint64_t* w, uint64_t* z, uint64_t* z_c, uint8_t* batch_mask, uint64_t* new_node_n, uint64_t node_n);
 int read_file_graph(char* graph_path, uint64_t** edge_start, uint64_t** edge_end, uint64_t** edge_weight, uint64_t* edge_n, uint64_t* node_n);
 uint64_t read_file_uint64(FILE *file);
-
-__global__ void init_partition(uint64_t node_n, unsigned char* batch_mask,  uint64_t* z) { 
-    uint64_t i = blockIdx.x * blockDim.x + threadIdx.x;
-    if(i < node_n) {
-        z[i] = batch_mask[i] ? node_n : i;
-    }
-}
+int read_part(uint64_t* z_c, uint64_t node_n);
 
 __global__ void set_values(uint64_t edge_n, uint64_t* edge_weight, uint64_t* edge_end, uint64_t* values, uint64_t* result) { 
     uint64_t i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -55,7 +49,7 @@ __global__ void set_values(uint64_t edge_n, uint64_t* edge_weight, uint64_t* edg
     }
 }
 
-__global__ void set_partition(uint64_t unique_node_count, unsigned char* batch_mask, uint64_t* z, uint64_t *result, uint64_t *unique_nodes) {
+__global__ void set_partition(uint64_t unique_node_count, uint8_t* batch_mask, uint64_t* z, uint64_t *result, uint64_t *unique_nodes) {
     uint64_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i < unique_node_count) {
         uint64_t node = unique_nodes[i];
@@ -74,9 +68,15 @@ __global__ void randomize(uint64_t node_n, uint64_t* v) {
     }
 }
 
+__global__ void init_partition(uint64_t node_n, uint8_t* batch_mask,  uint64_t* z) { 
+    uint64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i < node_n) {
+        z[i] = batch_mask[i] ? node_n : i;
+    }
+}
 
 int main(int argc, char* argv[]) {
-    unsigned char *batch_mask, *d_batch_mask;
+    uint8_t *batch_mask, *d_batch_mask;
 
     uint64_t edge_n, *edge_start, *edge_end, *w, *z, *z_c, max_batch_edge_n, batches,
              *edge_weight, *d_w, *d_z, *d_swp, *d_edge_buffer, *d_key_node_buffer,
@@ -98,12 +98,14 @@ int main(int argc, char* argv[]) {
     max_batch_edge_n = atoll(argv[2]); 
 
     CHECK_RESULT( read_file_graph(argv[1], &edge_start, &edge_end, &edge_weight, &edge_n, &node_n) );
+    uint64_t n = node_n;
 
     CHECK_ALLOC( w = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
     CHECK_ALLOC( z = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
     CHECK_ALLOC( z_c = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
-    CHECK_ALLOC( batch_mask = (unsigned char*)malloc(sizeof(unsigned char) * node_n) );
+    CHECK_ALLOC( batch_mask = (uint8_t*)malloc(sizeof(uint8_t) * node_n) );
 
+    CHECK_CUDA( cudaMalloc((void **)&d_batch_mask, node_n * sizeof(uint8_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_edge_start, max_batch_edge_n * sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_edge_end, max_batch_edge_n * sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_edge_weight, max_batch_edge_n * sizeof(uint64_t)) );
@@ -112,7 +114,6 @@ int main(int argc, char* argv[]) {
     CHECK_CUDA( cudaMalloc((void **)&d_value_node_buffer, node_n * sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_w, node_n * sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_z, node_n * sizeof(uint64_t)) );
-    CHECK_CUDA( cudaMalloc((void **)&d_batch_mask, node_n * sizeof(unsigned char)) );
 
     CHECK_CUDA( cudaMalloc((void **)&d_unique_node_count, sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_unique_edge_count, sizeof(uint64_t)) );
@@ -137,22 +138,26 @@ int main(int argc, char* argv[]) {
             uint64_t batch_end = min(edge_n, batch_start + max_batch_edge_n);
             uint64_t batch_edge_n = batch_end - batch_start;
 
-            for(uint64_t i=0; i<node_n; ++i) batch_mask[i] = 1;
+            for(uint64_t i=0; i<node_n; ++i) {
+                batch_mask[i] = !batch ? 1 : 0;
+            }
+
+            for(uint64_t i=batch_start; i<batch_end; ++i) {
+                batch_mask[edge_start[i]] = 1;
+            }
 
             for(uint64_t i=0; i<batch_start; ++i) {
                 batch_mask[edge_start[i]] = 0;
-                batch_mask[edge_end[i]] = 0;
             }
 
             for(uint64_t i=batch_end; i<edge_n; ++i) {
                 batch_mask[edge_start[i]] = 0;
-                batch_mask[edge_end[i]] = 0;
             }
 
             CHECK_CUDA( cudaMemcpy(d_edge_start, edge_start + batch_start, batch_edge_n * sizeof(uint64_t), cudaMemcpyHostToDevice) );
             CHECK_CUDA( cudaMemcpy(d_edge_end, edge_end + batch_start, batch_edge_n * sizeof(uint64_t), cudaMemcpyHostToDevice) );
             CHECK_CUDA( cudaMemcpy(d_edge_weight, edge_weight + batch_start, batch_edge_n * sizeof(uint64_t), cudaMemcpyHostToDevice) );
-            CHECK_CUDA( cudaMemcpy(d_batch_mask, batch_mask, node_n * sizeof(unsigned char), cudaMemcpyHostToDevice) );
+            CHECK_CUDA( cudaMemcpy(d_batch_mask, batch_mask, node_n * sizeof(uint8_t), cudaMemcpyHostToDevice) );
             cub::DeviceSelect::Unique(d_temp_storage, max_temp_sizes_bytes, d_edge_start, d_key_node_buffer, d_unique_node_count, batch_edge_n);
             CHECK_CUDA( cudaMemcpy(&unique_node_count, d_unique_node_count, sizeof(uint64_t), cudaMemcpyDeviceToHost) );
             init_partition<<<(node_n+(THREAD_N-1)) / THREAD_N, THREAD_N>>>(node_n, d_batch_mask, d_w);
@@ -206,15 +211,15 @@ int main(int argc, char* argv[]) {
             z[i] = 0; 
             w[i] = edge_n;
         }
+        //read_part(z_c,n);
 
         uint64_t new_edge_n = 0;
-        uint64_t first_edge_i = 0;
-        uint64_t current_node = edge_start[0];
-        unsigned char counting = 1;
-        z[z_c[edge_start[0]]] = 1;
+        uint64_t first_edge_i;
+        uint64_t current_node;
+        uint8_t counting;
 
         for(uint64_t i=0; i<edge_n; ++i) {
-            if(i && edge_start[i] != current_node) {
+            if(!i || edge_start[i] != current_node) {
                 current_node = edge_start[i];
                 counting = !z[z_c[edge_start[i]]];
                 first_edge_i = new_edge_n;
@@ -225,7 +230,7 @@ int main(int argc, char* argv[]) {
                 edge_start[i] = z_c[edge_start[i]];
                 edge_end[i] = z_c[edge_end[i]];
 
-                if(w[edge_end[i]] < first_edge_i || w[edge_end[i]] == edge_n) {
+                if(w[edge_end[i]] == edge_n || w[edge_end[i]] < first_edge_i) {
                     edge_start[new_edge_n] = edge_start[i];
                     edge_end[new_edge_n] = edge_end[i];
                     edge_weight[new_edge_n] = edge_weight[i];
@@ -246,50 +251,62 @@ int main(int argc, char* argv[]) {
         node_n = new_node_n;
     } while(batches > 1);
 
+        
+    printf("%lu\n", node_n);
+    printf("%lu\n", edge_n);
 
-    printf("%u\n", node_n);
-    printf("%u\n", edge_n);
     for(uint64_t i = 0; i< edge_n; ++i) {
         printf("%lu %lu %lu\n", edge_start[i], edge_weight[i], edge_end[i]);
     }
     return 0;
 }
 
-int is_equivalent(uint64_t* w, uint64_t* z, uint64_t* z_c, unsigned char* batch_mask, uint64_t* new_node_n, uint64_t node_n) {
+int is_equivalent(uint64_t* w, uint64_t* z, uint64_t* z_c, uint8_t* batch_mask, uint64_t* new_node_n, uint64_t node_n) {
     flat_hash_map<uint64_t, uint64_t> w_unordered_map;
-    uint64_t w_last = 1;
+    uint64_t w_seen = 1;
     flat_hash_map<uint64_t, uint64_t> z_unordered_map;
-    uint64_t z_last = 1;
+    uint64_t z_seen = 1;
     w_unordered_map.reserve(node_n);
     z_unordered_map.reserve(node_n);
     uint64_t z_current_c;
+    uint64_t start_new_node_n = *new_node_n;
 
     for(uint64_t i=0; i<node_n; ++i) {
         uint64_t w_val = w[i];
         if(!w_unordered_map[w_val]) {
-            w_unordered_map[w_val] = w_last;
-            ++w_last;
+            w_unordered_map[w_val] = w_seen;
+            ++w_seen;
         }
 
         uint64_t z_val = z[i];
         if(!(z_current_c = z_unordered_map[z_val])) {
             if(!batch_mask[i]) {
-                z_unordered_map[z_val] = z_last;
-                z_current_c = z_last;
+                z_unordered_map[z_val] = z_seen;
+                z_current_c = z_seen;
             } else {
                 z_current_c = ++(*new_node_n);
                 z_unordered_map[z_val] = z_current_c;
             }
-            ++z_last;
+            ++z_seen;
         }
         if(batch_mask[i]) {
             z_c[i] = z_current_c - 1;
         }
 
-        if(w_last != z_last) 
+        if(w_seen != z_seen) {
+            *new_node_n = start_new_node_n;
             return 0;
+        }
     }
     return 1;
+}
+
+int read_part(uint64_t* z_c, uint64_t node_n) {
+    FILE *file = fopen("part.txt", "r");
+    for(uint64_t i=0; i<node_n; ++i) {
+        z_c[i] = read_file_uint64(file); 
+    }
+    return 0;
 }
 
 int read_file_graph(char* graph_path, uint64_t** edge_start, uint64_t** edge_end, uint64_t** edge_weight, uint64_t* edge_n, uint64_t* node_n) {
