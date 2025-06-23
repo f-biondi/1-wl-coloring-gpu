@@ -21,7 +21,15 @@
 #define CHECK_ALLOC(p)                                                         \
 {                                                                              \
     if (!(p)) {                                                                \
-        printf("Out of Host memory!");                                         \
+        printf("Out of Host memory!\n");                                         \
+        return EXIT_FAILURE;                                                   \
+    }                                                                          \
+}
+
+#define CHECK_WEIGHT(tot, c)                                                   \
+{                                                                              \
+    if (UINT64_MAX - tot < c) {                                                \
+        printf("Total edge weight exceeding limit!\n");                          \
         return EXIT_FAILURE;                                                   \
     }                                                                          \
 }
@@ -302,9 +310,12 @@ int read_file_graph(char* graph_path, uint64_t** edge_start, uint64_t** edge_end
     CHECK_ALLOC( *edge_start = (uint64_t*)malloc(*edge_n * sizeof(uint64_t)) );
     CHECK_ALLOC( *edge_end = (uint64_t*)malloc(*edge_n * sizeof(uint64_t)) );
     CHECK_ALLOC( *edge_weight = (uint64_t*)malloc(*edge_n * sizeof(uint64_t)) );
+    uint64_t tot_weight = 0;
     for(uint64_t i=0; i<*edge_n; ++i) {
         (*edge_start)[i] = read_file_uint64(file); 
         (*edge_weight)[i] = read_file_uint64(file); 
+        CHECK_WEIGHT(tot_weight, (*edge_weight)[i]);
+        tot_weight += (*edge_weight)[i];
         (*edge_end)[i] = read_file_uint64(file); 
     }
     return 0;
