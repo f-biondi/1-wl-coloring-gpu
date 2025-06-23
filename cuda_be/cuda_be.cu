@@ -38,7 +38,6 @@ using absl::flat_hash_map;
 int is_equivalent(uint64_t* w, uint64_t* z, uint64_t* z_c, uint8_t* batch_mask, uint64_t* new_node_n, uint64_t node_n);
 int read_file_graph(char* graph_path, uint64_t** edge_start, uint64_t** edge_end, uint64_t** edge_weight, uint64_t* edge_n, uint64_t* node_n);
 uint64_t read_file_uint64(FILE *file);
-int read_part(uint64_t* z_c, uint64_t node_n);
 
 __global__ void set_values(uint64_t edge_n, uint64_t* edge_weight, uint64_t* edge_end, uint64_t* values, uint64_t* result) { 
     uint64_t i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -210,7 +209,6 @@ int main(int argc, char* argv[]) {
             z[i] = 0; 
             w[i] = edge_n;
         }
-        //read_part(z_c,n);
 
         uint64_t new_edge_n = 0;
         uint64_t first_edge_i;
@@ -298,14 +296,6 @@ int is_equivalent(uint64_t* w, uint64_t* z, uint64_t* z_c, uint8_t* batch_mask, 
         }
     }
     return 1;
-}
-
-int read_part(uint64_t* z_c, uint64_t node_n) {
-    FILE *file = fopen("part.txt", "r");
-    for(uint64_t i=0; i<node_n; ++i) {
-        z_c[i] = read_file_uint64(file); 
-    }
-    return 0;
 }
 
 int read_file_graph(char* graph_path, uint64_t** edge_start, uint64_t** edge_end, uint64_t** edge_weight, uint64_t* edge_n, uint64_t* node_n) {

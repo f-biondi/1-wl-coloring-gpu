@@ -61,17 +61,18 @@ int main(void) {
     }
 
     uint64_t new_edge_n = 0;
-    uint64_t first_edge_i = 0;
-    uint64_t current_node = edge_start[0];
-    unsigned char counting = 1;
+    uint64_t first_edge_i;
+    uint64_t current_node;
+    uint8_t counting;
 
     for(uint64_t i = 0; i<new_node_n; ++i) { 
         z[i] = 0;
         w[i] = edge_n;
     }
 
+
     for(uint64_t i=0; i<edge_n; ++i) {
-        if(i && edge_start[i] != current_node) {
+        if(!i || edge_start[i] != current_node) {
             current_node = edge_start[i];
             counting = !z[z_c[edge_start[i]]];
             first_edge_i = new_edge_n;
@@ -82,7 +83,7 @@ int main(void) {
             edge_start[i] = z_c[edge_start[i]];
             edge_end[i] = z_c[edge_end[i]];
 
-            if(w[edge_end[i]] < first_edge_i || w[edge_end[i]] == edge_n) {
+            if(w[edge_end[i]] == edge_n || w[edge_end[i]] < first_edge_i) {
                 edge_start[new_edge_n] = edge_start[i];
                 edge_end[new_edge_n] = edge_end[i];
                 edge_weight[new_edge_n] = edge_weight[i];
