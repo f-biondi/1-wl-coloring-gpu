@@ -80,8 +80,8 @@ int main(int argc, char* argv[]) {
     uint64_t edge_n, *edge_start, *edge_end, *w, *z, *z_c, max_batch_edge_n, batches,
              *edge_weight, *d_w, *d_z, *d_swp, *d_edge_buffer, *d_key_node_buffer,
              *d_value_node_buffer, *d_unique_edge_count, *d_edge_weight, *d_edge_start,
-             *d_edge_end, node_n, unique_node_count, new_node_n, w_unique_n, z_unique_n,
-             *d_unique_node_count, *d_w_unique_n, *d_z_unique_n;
+             *d_edge_end, node_n, unique_node_count, new_node_n, new_edge_n,
+             w_unique_n, z_unique_n, *d_unique_node_count, *d_w_unique_n, *d_z_unique_n;
 
     void *d_temp_storage = nullptr;
 
@@ -126,7 +126,11 @@ int main(int argc, char* argv[]) {
     max_temp_sizes_bytes = *std::max_element(temp_sizes_bytes, temp_sizes_bytes + 4);
     CHECK_CUDA( cudaMalloc(&d_temp_storage, max_temp_sizes_bytes) );
 
+    new_node_n = node_n;
+    new_edge_n = edge_n;
     do {
+        edge_n = new_edge_n;
+        node_n = new_node_n;
         new_node_n = 0;
         for(uint64_t i=0; i<node_n; ++i) z_c[i] = node_n;
         batches = ceil(edge_n / (float)max_batch_edge_n);
@@ -210,7 +214,7 @@ int main(int argc, char* argv[]) {
             w[i] = edge_n;
         }
 
-        uint64_t new_edge_n = 0;
+        new_edge_n = 0;
         uint64_t first_edge_i;
         uint64_t current_node;
         uint8_t counting;
@@ -238,21 +242,14 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
-        
-        if(new_edge_n == edge_n && batches > 1) {
-            printf("Impossible reduction with given batch size! (2)\n");
-            return EXIT_FAILURE;
-        }
-
-        edge_n = new_edge_n;
-        node_n = new_node_n;
-    } while(batches > 1);
+    } while(batches > 1 && node_n > new_node_n);
 
         
-    printf("%lu\n", node_n);
-    printf("%lu\n", edge_n);
+    printf("%lu\n", batches == 1);
+    printf("%lu\n", new_node_n);
+    printf("%lu\n", new_edge_n);
 
-    for(uint64_t i = 0; i< edge_n; ++i) {
+    for(uint64_t i = 0; i< new_edge_n; ++i) {
         printf("%lu %lu %lu\n", edge_start[i], edge_weight[i], edge_end[i]);
     }
     return 0;
