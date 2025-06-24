@@ -21,7 +21,7 @@
 #define CHECK_ALLOC(p)                                                         \
 {                                                                              \
     if (!(p)) {                                                                \
-        printf("Out of Host memory!\n");                                         \
+        printf("Out of Host memory!\n");                                       \
         return EXIT_FAILURE;                                                   \
     }                                                                          \
 }
@@ -29,7 +29,7 @@
 #define CHECK_WEIGHT(tot, c)                                                   \
 {                                                                              \
     if (UINT64_MAX - tot < c) {                                                \
-        printf("Total edge weight exceeding limit!\n");                          \
+        printf("Total edge weight exceeding limit!\n");                        \
         return EXIT_FAILURE;                                                   \
     }                                                                          \
 }
@@ -251,7 +251,6 @@ int main(int argc, char* argv[]) {
             }
         }
     } while(batches > 1 && node_n > new_node_n);
-
         
     printf("%lu\n", batches == 1);
     printf("%lu\n", new_node_n);
