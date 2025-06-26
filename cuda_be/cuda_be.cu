@@ -109,7 +109,7 @@ int main(int argc, char* argv[]) {
     max_batch_edge_n = argc == 2 ? atoll(argv[1]) : edge_n; 
 
     if(max_batch_edge_n < node_n) {
-        printf("The max batch edge number must be greater than the node number!");
+        printf("The max batch edge number must be greater or equal to the node number!\n");
         return EXIT_FAILURE;
     }
 
