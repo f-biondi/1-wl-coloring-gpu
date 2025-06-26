@@ -7,8 +7,7 @@
 #include "absl/container/flat_hash_map.h"
 #define THREAD_N 256
 #define MMULT_N 5
-#define NODE_T uint32_t
-#define NODE_T_MAX UINT32_MAX
+#define WEIGHT_MAX UINT32_MAX
 
 #define CHECK_CUDA(func)                                                       \
 {                                                                              \
@@ -30,7 +29,7 @@
 
 #define CHECK_WEIGHT(tot, c)                                                   \
 {                                                                              \
-    if (NODE_T_MAX - tot < c) {                                                \
+    if (WEIGHT_MAX - tot < c) {                                                \
         printf("Total edge weight exceeding limit!\n");                        \
         return EXIT_FAILURE;                                                   \
     }                                                                          \
@@ -44,19 +43,20 @@
 }
 
 using absl::flat_hash_map;
+typedef uint32_t node_t;
 
-int is_equivalent(uint64_t* w, uint64_t* z, NODE_T* z_c, uint8_t* batch_mask, NODE_T* new_node_n, NODE_T node_n);
-int read_graph(NODE_T** edge_start, NODE_T** edge_end, NODE_T** edge_weight, uint64_t* edge_n, NODE_T* node_n);
+int is_equivalent(uint64_t* w, uint64_t* z, node_t* z_c, uint8_t* batch_mask, node_t* new_node_n, node_t node_n);
+int read_graph(node_t** edge_start, node_t** edge_end, node_t** edge_weight, uint64_t* edge_n, node_t* node_n);
 uint64_t read_uint64();
 
-__global__ void init_partition(NODE_T node_n, uint8_t* batch_mask,  uint64_t* z) { 
-    NODE_T i = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void init_partition(node_t node_n, uint8_t* batch_mask,  uint64_t* z) { 
+    node_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i < node_n) {
         z[i] = batch_mask[i] ? node_n : i;
     }
 }
 
-__global__ void set_values(uint64_t edge_n, NODE_T* edge_weight, NODE_T* edge_end, uint64_t* values, uint64_t* result) { 
+__global__ void set_values(uint64_t edge_n, node_t* edge_weight, node_t* edge_end, uint64_t* values, uint64_t* result) { 
     uint64_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i < edge_n) {
         uint64_t end = edge_end[i];
@@ -65,16 +65,16 @@ __global__ void set_values(uint64_t edge_n, NODE_T* edge_weight, NODE_T* edge_en
     }
 }
 
-__global__ void set_partition(NODE_T unique_node_count, uint8_t* batch_mask, uint64_t* z, uint64_t *result, NODE_T *unique_nodes) {
-    NODE_T i = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void set_partition(node_t unique_node_count, uint8_t* batch_mask, uint64_t* z, uint64_t *result, node_t *unique_nodes) {
+    node_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i < unique_node_count) {
-        NODE_T node = unique_nodes[i];
+        node_t node = unique_nodes[i];
         z[node] = batch_mask[node] ? result[i] : node;
     }
 }
 
-__global__ void randomize(NODE_T node_n, uint64_t* v) { 
-    NODE_T i = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void randomize(node_t node_n, uint64_t* v) { 
+    node_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if(i < node_n) {
         uint64_t z = v[i] + 0x9e3779b97f4a7c15;
         z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9;
@@ -92,7 +92,7 @@ int main(int argc, char* argv[]) {
              *d_value_node_buffer,max_batch_edge_n,
              batches, *d_edge_buffer; 
 
-    NODE_T node_n, *edge_start, *edge_end, *z_c,
+    node_t node_n, *edge_start, *edge_end, *z_c,
            *edge_weight, *d_key_node_buffer,
            *d_edge_weight, *d_edge_start,
            *d_edge_end, unique_node_count, new_node_n,
@@ -115,23 +115,23 @@ int main(int argc, char* argv[]) {
 
     CHECK_ALLOC( w = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
     CHECK_ALLOC( z = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
-    CHECK_ALLOC( z_c = (NODE_T*)malloc(sizeof(NODE_T) * node_n) );
+    CHECK_ALLOC( z_c = (node_t*)malloc(sizeof(node_t) * node_n) );
     CHECK_ALLOC( batch_mask = (uint8_t*)malloc(sizeof(uint8_t) * node_n) );
 
     CHECK_CUDA( cudaMalloc((void **)&d_batch_mask, node_n * sizeof(uint8_t)) );
-    CHECK_CUDA( cudaMalloc((void **)&d_edge_start, max_batch_edge_n * sizeof(NODE_T)) );
-    CHECK_CUDA( cudaMalloc((void **)&d_edge_end, max_batch_edge_n * sizeof(NODE_T)) );
-    CHECK_CUDA( cudaMalloc((void **)&d_edge_weight, max_batch_edge_n * sizeof(NODE_T)) );
+    CHECK_CUDA( cudaMalloc((void **)&d_edge_start, max_batch_edge_n * sizeof(node_t)) );
+    CHECK_CUDA( cudaMalloc((void **)&d_edge_end, max_batch_edge_n * sizeof(node_t)) );
+    CHECK_CUDA( cudaMalloc((void **)&d_edge_weight, max_batch_edge_n * sizeof(node_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_edge_buffer, max_batch_edge_n * sizeof(uint64_t)) );
-    CHECK_CUDA( cudaMalloc((void **)&d_key_node_buffer, node_n * sizeof(NODE_T)) );
+    CHECK_CUDA( cudaMalloc((void **)&d_key_node_buffer, node_n * sizeof(node_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_value_node_buffer, node_n * sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_w, node_n * sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_z, node_n * sizeof(uint64_t)) );
 
-    CHECK_CUDA( cudaMalloc((void **)&d_unique_node_count, sizeof(NODE_T)) );
+    CHECK_CUDA( cudaMalloc((void **)&d_unique_node_count, sizeof(node_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_unique_edge_count, sizeof(uint64_t)) );
-    CHECK_CUDA( cudaMalloc((void **)&d_w_unique_n, sizeof(NODE_T)) );
-    CHECK_CUDA( cudaMalloc((void **)&d_z_unique_n, sizeof(NODE_T)) );
+    CHECK_CUDA( cudaMalloc((void **)&d_w_unique_n, sizeof(node_t)) );
+    CHECK_CUDA( cudaMalloc((void **)&d_z_unique_n, sizeof(node_t)) );
 
     cub::DeviceSelect::Unique(d_temp_storage, temp_sizes_bytes[0], d_edge_start, d_key_node_buffer, d_unique_node_count, max_batch_edge_n);
     cub::DeviceReduce::ReduceByKey(d_temp_storage, temp_sizes_bytes[1], d_edge_start, d_key_node_buffer, d_edge_buffer, d_value_node_buffer, d_unique_node_count, reduction_op, max_batch_edge_n);
@@ -147,7 +147,7 @@ int main(int argc, char* argv[]) {
         edge_n = new_edge_n;
         node_n = new_node_n;
         new_node_n = 0;
-        for(NODE_T i=0; i<node_n; ++i) z_c[i] = node_n;
+        for(node_t i=0; i<node_n; ++i) z_c[i] = node_n;
         batches = ceil(edge_n / (float)max_batch_edge_n);
 
         for(uint64_t batch = 0; batch<batches; ++batch) {  
@@ -155,7 +155,7 @@ int main(int argc, char* argv[]) {
             uint64_t batch_end = min(edge_n, batch_start + max_batch_edge_n);
             uint64_t batch_edge_n = batch_end - batch_start;
 
-            for(NODE_T i=0; i<node_n; ++i) {
+            for(node_t i=0; i<node_n; ++i) {
                 batch_mask[i] = !batch ? 1 : 0;
             }
 
@@ -171,12 +171,12 @@ int main(int argc, char* argv[]) {
                 batch_mask[edge_start[i]] = 0;
             }
 
-            CHECK_CUDA( cudaMemcpy(d_edge_start, edge_start + batch_start, batch_edge_n * sizeof(NODE_T), cudaMemcpyHostToDevice) );
-            CHECK_CUDA( cudaMemcpy(d_edge_end, edge_end + batch_start, batch_edge_n * sizeof(NODE_T), cudaMemcpyHostToDevice) );
-            CHECK_CUDA( cudaMemcpy(d_edge_weight, edge_weight + batch_start, batch_edge_n * sizeof(NODE_T), cudaMemcpyHostToDevice) );
+            CHECK_CUDA( cudaMemcpy(d_edge_start, edge_start + batch_start, batch_edge_n * sizeof(node_t), cudaMemcpyHostToDevice) );
+            CHECK_CUDA( cudaMemcpy(d_edge_end, edge_end + batch_start, batch_edge_n * sizeof(node_t), cudaMemcpyHostToDevice) );
+            CHECK_CUDA( cudaMemcpy(d_edge_weight, edge_weight + batch_start, batch_edge_n * sizeof(node_t), cudaMemcpyHostToDevice) );
             CHECK_CUDA( cudaMemcpy(d_batch_mask, batch_mask, node_n * sizeof(uint8_t), cudaMemcpyHostToDevice) );
             cub::DeviceSelect::Unique(d_temp_storage, max_temp_sizes_bytes, d_edge_start, d_key_node_buffer, d_unique_node_count, batch_edge_n);
-            CHECK_CUDA( cudaMemcpy(&unique_node_count, d_unique_node_count, sizeof(NODE_T), cudaMemcpyDeviceToHost) );
+            CHECK_CUDA( cudaMemcpy(&unique_node_count, d_unique_node_count, sizeof(node_t), cudaMemcpyDeviceToHost) );
             init_partition<<<(node_n+(THREAD_N-1)) / THREAD_N, THREAD_N>>>(node_n, d_batch_mask, d_w);
 
             while(1) {
@@ -205,8 +205,8 @@ int main(int argc, char* argv[]) {
                     cub::DeviceRadixSort::SortKeys(d_temp_storage, max_temp_sizes_bytes, d_z, d_value_node_buffer, node_n);
                     cub::DeviceSelect::Unique(d_temp_storage, max_temp_sizes_bytes, d_value_node_buffer, d_edge_buffer, d_z_unique_n, node_n);
 
-                    CHECK_CUDA( cudaMemcpy(&w_unique_n, d_w_unique_n, sizeof(NODE_T), cudaMemcpyDeviceToHost) );
-                    CHECK_CUDA( cudaMemcpy(&z_unique_n, d_z_unique_n, sizeof(NODE_T), cudaMemcpyDeviceToHost) );
+                    CHECK_CUDA( cudaMemcpy(&w_unique_n, d_w_unique_n, sizeof(node_t), cudaMemcpyDeviceToHost) );
+                    CHECK_CUDA( cudaMemcpy(&z_unique_n, d_z_unique_n, sizeof(node_t), cudaMemcpyDeviceToHost) );
 
                     if(w_unique_n == z_unique_n)
                         break;
@@ -220,7 +220,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        for(NODE_T i=0; i<node_n; ++i) {
+        for(node_t i=0; i<node_n; ++i) {
             if(z_c[i] == node_n) { 
                 z_c[i] = new_node_n++;
             }
@@ -231,7 +231,7 @@ int main(int argc, char* argv[]) {
 
         new_edge_n = 0;
         uint64_t first_edge_i;
-        NODE_T current_node;
+        node_t current_node;
         uint8_t counting;
 
         for(uint64_t i=0; i<edge_n; ++i) {
@@ -269,17 +269,17 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-int is_equivalent(uint64_t* w, uint64_t* z, NODE_T* z_c, uint8_t* batch_mask, NODE_T* new_node_n, NODE_T node_n) {
-    flat_hash_map<uint64_t, NODE_T> w_unordered_map;
-    NODE_T w_seen = 1;
-    flat_hash_map<uint64_t, NODE_T> z_unordered_map;
-    NODE_T z_seen = 1;
+int is_equivalent(uint64_t* w, uint64_t* z, node_t* z_c, uint8_t* batch_mask, node_t* new_node_n, node_t node_n) {
+    flat_hash_map<uint64_t, node_t> w_unordered_map;
+    node_t w_seen = 1;
+    flat_hash_map<uint64_t, node_t> z_unordered_map;
+    node_t z_seen = 1;
     w_unordered_map.reserve(node_n);
     z_unordered_map.reserve(node_n);
-    NODE_T z_current_c;
-    NODE_T start_new_node_n = *new_node_n;
+    node_t z_current_c;
+    node_t start_new_node_n = *new_node_n;
 
-    for(NODE_T i=0; i<node_n; ++i) {
+    for(node_t i=0; i<node_n; ++i) {
         uint64_t w_val = w[i];
         if(!w_unordered_map[w_val]) {
             w_unordered_map[w_val] = w_seen;
@@ -309,13 +309,13 @@ int is_equivalent(uint64_t* w, uint64_t* z, NODE_T* z_c, uint8_t* batch_mask, NO
     return 1;
 }
 
-int read_graph(NODE_T** edge_start, NODE_T** edge_end, NODE_T** edge_weight, uint64_t* edge_n, NODE_T* node_n) {
+int read_graph(node_t** edge_start, node_t** edge_end, node_t** edge_weight, uint64_t* edge_n, node_t* node_n) {
     *node_n = read_uint64();
     *edge_n = read_uint64();
-    CHECK_ALLOC( *edge_start = (NODE_T*)malloc(*edge_n * sizeof(NODE_T)) );
-    CHECK_ALLOC( *edge_end = (NODE_T*)malloc(*edge_n * sizeof(NODE_T)) );
-    CHECK_ALLOC( *edge_weight = (NODE_T*)malloc(*edge_n * sizeof(NODE_T)) );
-    NODE_T tot_weight = 0;
+    CHECK_ALLOC( *edge_start = (node_t*)malloc(*edge_n * sizeof(node_t)) );
+    CHECK_ALLOC( *edge_end = (node_t*)malloc(*edge_n * sizeof(node_t)) );
+    CHECK_ALLOC( *edge_weight = (node_t*)malloc(*edge_n * sizeof(node_t)) );
+    node_t tot_weight = 0;
     for(uint64_t i=0; i<*edge_n; ++i) {
         (*edge_start)[i] = read_uint64(); 
         (*edge_weight)[i] = read_uint64(); 
