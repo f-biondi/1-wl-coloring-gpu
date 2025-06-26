@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <chrono>         
 #include "absl/container/flat_hash_map.h"
 #define MMULT_N 5
 #define WEIGHT_MAX UINT32_MAX
@@ -45,6 +46,7 @@ int main(void) {
     CHECK_ALLOC( z = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
     CHECK_ALLOC( z_c = (node_t*)malloc(sizeof(node_t) * node_n) );
 
+    auto st = std::chrono::steady_clock::now();
     for(node_t i = 0; i<node_n; ++i){
         w[i] = 1;
         z[i] = 0;
@@ -96,12 +98,11 @@ int main(void) {
         }
     }
 
+    auto en = std::chrono::steady_clock::now();
+    double time_s = std::chrono::duration_cast<std::chrono::microseconds>(en - st).count() / 1000000.0;
+    printf("%f\n", time_s);
     printf("%u\n", new_node_n);
     printf("%lu\n", new_edge_n);
-
-    for(uint64_t i = 0; i< new_edge_n; ++i) {
-        printf("%lu %lu %lu\n", edge_start[i], edge_weight[i], edge_end[i]);
-    }
 
     return 0;
 }

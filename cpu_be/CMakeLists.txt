@@ -10,6 +10,7 @@ set(CMAKE_CXX_FLAGS "-O2")
 add_subdirectory(abseil-cpp)
 
 add_executable(be be.cpp)
+add_executable(be_time be_time.cpp)
 
-# Declare dependency on the absl::strings library
 target_link_libraries(be absl::flat_hash_map)
+target_link_libraries(be_time absl::flat_hash_map)
