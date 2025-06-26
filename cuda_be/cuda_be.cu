@@ -44,8 +44,8 @@
 using absl::flat_hash_map;
 
 int is_equivalent(uint64_t* w, uint64_t* z, uint64_t* z_c, uint8_t* batch_mask, uint64_t* new_node_n, uint64_t node_n);
-int read_file_graph(char* graph_path, uint64_t** edge_start, uint64_t** edge_end, uint64_t** edge_weight, uint64_t* edge_n, uint64_t* node_n);
-uint64_t read_file_uint64(FILE *file);
+int read_graph(uint64_t** edge_start, uint64_t** edge_end, uint64_t** edge_weight, uint64_t* edge_n, uint64_t* node_n);
+uint64_t read_uint64();
 
 __global__ void set_values(uint64_t edge_n, uint64_t* edge_weight, uint64_t* edge_end, uint64_t* values, uint64_t* result) { 
     uint64_t i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -97,14 +97,8 @@ int main(int argc, char* argv[]) {
 
     auto reduction_op = cuda::std::plus{};
 
-    if(argc < 3) {
-        printf("./be_cuda <graph_path> <max_batch_edge_n>\n");
-        return EXIT_FAILURE;
-    } 
-
-    max_batch_edge_n = atoll(argv[2]); 
-
-    CHECK_RESULT( read_file_graph(argv[1], &edge_start, &edge_end, &edge_weight, &edge_n, &node_n) );
+    CHECK_RESULT( read_graph(&edge_start, &edge_end, &edge_weight, &edge_n, &node_n) );
+    max_batch_edge_n = argc == 2 ? atoll(argv[1]) : edge_n; 
 
     CHECK_ALLOC( w = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
     CHECK_ALLOC( z = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
@@ -302,32 +296,31 @@ int is_equivalent(uint64_t* w, uint64_t* z, uint64_t* z_c, uint8_t* batch_mask, 
     return 1;
 }
 
-int read_file_graph(char* graph_path, uint64_t** edge_start, uint64_t** edge_end, uint64_t** edge_weight, uint64_t* edge_n, uint64_t* node_n) {
-    FILE *file = fopen(graph_path, "r");
-    *node_n = read_file_uint64(file);
-    *edge_n = read_file_uint64(file);
+int read_graph(uint64_t** edge_start, uint64_t** edge_end, uint64_t** edge_weight, uint64_t* edge_n, uint64_t* node_n) {
+    *node_n = read_uint64();
+    *edge_n = read_uint64();
     CHECK_ALLOC( *edge_start = (uint64_t*)malloc(*edge_n * sizeof(uint64_t)) );
     CHECK_ALLOC( *edge_end = (uint64_t*)malloc(*edge_n * sizeof(uint64_t)) );
     CHECK_ALLOC( *edge_weight = (uint64_t*)malloc(*edge_n * sizeof(uint64_t)) );
     uint64_t tot_weight = 0;
     for(uint64_t i=0; i<*edge_n; ++i) {
-        (*edge_start)[i] = read_file_uint64(file); 
-        (*edge_weight)[i] = read_file_uint64(file); 
+        (*edge_start)[i] = read_uint64(); 
+        (*edge_weight)[i] = read_uint64(); 
         CHECK_WEIGHT(tot_weight, (*edge_weight)[i]);
         tot_weight += (*edge_weight)[i];
-        (*edge_end)[i] = read_file_uint64(file); 
+        (*edge_end)[i] = read_uint64(); 
     }
     return 0;
 }
 
-uint64_t read_file_uint64(FILE *file) {
-    char ch = fgetc(file);
+uint64_t read_uint64() {
+    char ch = getchar();
     uint64_t n = 0;
     uint64_t c = 0;
     while(ch != ' ' && ch != '\n') {
         c = ch - '0';   
         n = (n*10) + c;
-        ch = fgetc(file);
+        ch = getchar();
     }
     return n;
 }
