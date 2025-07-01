@@ -814,11 +814,11 @@ static void minimize(){
   printf("%f\n", time_s);
   printf("%u\n", B.nr_sets);
   printf("%u\n", nr_w_out);
-  /*printf("[%u", B.sets[1]);
+  printf("[%u", B.sets[1]);
   for(unsigned i = 2; i<= nr_states;++i) {
     printf(",%u", B.sets[i]);
   }
-  printf("]\n");*/
+  printf("]\n");
 
   /* Release memory that is not needed any more. */
   B.locs.del();

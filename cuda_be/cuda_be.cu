@@ -89,11 +89,11 @@ int main(int argc, char* argv[]) {
 
     uint64_t edge_n, new_edge_n, *w, *z, *d_w,
              *d_z, *d_unique_edge_count, *d_swp,
-             *d_value_node_buffer,max_batch_edge_n,
-             batches, *d_edge_buffer; 
+             *d_value_node_buffer, *d_value_node_buffer2,
+             max_batch_edge_n,batches, *d_edge_buffer; 
 
-    node_t node_n, *edge_start, *edge_end, *z_c,
-           *edge_weight, *d_key_node_buffer,
+    node_t node_n, start_node_n, *edge_start, *edge_end, *z_c,
+           *final_z, *edge_weight, *d_key_node_buffer,
            *d_edge_weight, *d_edge_start,
            *d_edge_end, unique_node_count, new_node_n,
            w_unique_n, z_unique_n, *d_unique_node_count,
@@ -108,14 +108,10 @@ int main(int argc, char* argv[]) {
     CHECK_RESULT( read_graph(&edge_start, &edge_end, &edge_weight, &edge_n, &node_n) );
     max_batch_edge_n = argc == 2 ? atoll(argv[1]) : edge_n; 
 
-    if(max_batch_edge_n < node_n) {
-        printf("The max batch edge number must be greater or equal to the node number!\n");
-        return EXIT_FAILURE;
-    }
-
     CHECK_ALLOC( w = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
     CHECK_ALLOC( z = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
     CHECK_ALLOC( z_c = (node_t*)malloc(sizeof(node_t) * node_n) );
+    CHECK_ALLOC( final_z  = (node_t*)malloc(sizeof(node_t) * node_n) );
     CHECK_ALLOC( batch_mask = (uint8_t*)malloc(sizeof(uint8_t) * node_n) );
 
     CHECK_CUDA( cudaMalloc((void **)&d_batch_mask, node_n * sizeof(uint8_t)) );
@@ -125,6 +121,13 @@ int main(int argc, char* argv[]) {
     CHECK_CUDA( cudaMalloc((void **)&d_edge_buffer, max_batch_edge_n * sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_key_node_buffer, node_n * sizeof(node_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_value_node_buffer, node_n * sizeof(uint64_t)) );
+
+    if(max_batch_edge_n >= node_n) {
+        d_value_node_buffer2 = d_edge_buffer;        
+    } else {
+        CHECK_CUDA( cudaMalloc((void **)&d_value_node_buffer2, node_n * sizeof(uint64_t)) );
+    }
+
     CHECK_CUDA( cudaMalloc((void **)&d_w, node_n * sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_z, node_n * sizeof(uint64_t)) );
 
@@ -136,11 +139,14 @@ int main(int argc, char* argv[]) {
     cub::DeviceSelect::Unique(d_temp_storage, temp_sizes_bytes[0], d_edge_start, d_key_node_buffer, d_unique_node_count, max_batch_edge_n);
     cub::DeviceReduce::ReduceByKey(d_temp_storage, temp_sizes_bytes[1], d_edge_start, d_key_node_buffer, d_edge_buffer, d_value_node_buffer, d_unique_node_count, reduction_op, max_batch_edge_n);
     cub::DeviceRadixSort::SortKeys(d_temp_storage, temp_sizes_bytes[2], d_w, d_value_node_buffer, node_n);
-    cub::DeviceSelect::Unique(d_temp_storage, temp_sizes_bytes[3], d_value_node_buffer, d_edge_buffer, d_w_unique_n, node_n);
+    cub::DeviceSelect::Unique(d_temp_storage, temp_sizes_bytes[3], d_value_node_buffer, d_value_node_buffer2, d_w_unique_n, node_n);
 
     max_temp_sizes_bytes = *std::max_element(temp_sizes_bytes, temp_sizes_bytes + 4);
     CHECK_CUDA( cudaMalloc(&d_temp_storage, max_temp_sizes_bytes) );
 
+    for(node_t i=0; i<node_n; ++i) final_z[i] = i;
+
+    start_node_n = node_n;
     new_node_n = node_n;
     new_edge_n = edge_n;
     do {
@@ -200,10 +206,10 @@ int main(int argc, char* argv[]) {
                     }
 
                     cub::DeviceRadixSort::SortKeys(d_temp_storage, max_temp_sizes_bytes, d_w, d_value_node_buffer, node_n);
-                    cub::DeviceSelect::Unique(d_temp_storage, max_temp_sizes_bytes, d_value_node_buffer, d_edge_buffer, d_w_unique_n, node_n);
+                    cub::DeviceSelect::Unique(d_temp_storage, max_temp_sizes_bytes, d_value_node_buffer, d_value_node_buffer2, d_w_unique_n, node_n);
 
                     cub::DeviceRadixSort::SortKeys(d_temp_storage, max_temp_sizes_bytes, d_z, d_value_node_buffer, node_n);
-                    cub::DeviceSelect::Unique(d_temp_storage, max_temp_sizes_bytes, d_value_node_buffer, d_edge_buffer, d_z_unique_n, node_n);
+                    cub::DeviceSelect::Unique(d_temp_storage, max_temp_sizes_bytes, d_value_node_buffer, d_value_node_buffer2, d_z_unique_n, node_n);
 
                     CHECK_CUDA( cudaMemcpy(&w_unique_n, d_w_unique_n, sizeof(node_t), cudaMemcpyDeviceToHost) );
                     CHECK_CUDA( cudaMemcpy(&z_unique_n, d_z_unique_n, sizeof(node_t), cudaMemcpyDeviceToHost) );
@@ -229,9 +235,11 @@ int main(int argc, char* argv[]) {
             w[i] = edge_n;
         }
 
+        for(node_t i=0; i<start_node_n; ++i) final_z[i] = z_c[final_z[i]];
+
         new_edge_n = 0;
-        uint64_t first_edge_i;
         node_t current_node;
+        uint64_t first_edge_i;
         uint8_t counting;
 
         for(uint64_t i=0; i<edge_n; ++i) {
@@ -263,9 +271,14 @@ int main(int argc, char* argv[]) {
     printf("%lu\n", new_node_n);
     printf("%lu\n", new_edge_n);
 
-    for(uint64_t i = 0; i< new_edge_n; ++i) {
+    /*for(uint64_t i = 0; i< new_edge_n; ++i) {
         printf("%lu %lu %lu\n", edge_start[i], edge_weight[i], edge_end[i]);
+    }*/
+    printf("[%u", final_z[0]);
+    for(node_t i = 1; i < start_node_n; ++i) {
+        printf(",%u", final_z[i]);
     }
+    printf("]\n");
     return 0;
 }
 

@@ -177,6 +177,8 @@ inline unsigned MDP_give_block_next(){ return MDPmin::give_block_next(); }
 
 /* The main function is trivial. */
 int main(){
+  std::ios::sync_with_stdio(false);
+  std::cin.tie(0);
   reader input; MDP_read( input );
   MDPmin::minimize();
   //writer output; MDP_write( output );
