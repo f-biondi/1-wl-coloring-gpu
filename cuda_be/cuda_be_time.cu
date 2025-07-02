@@ -2,9 +2,9 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdint.h>
-#include <chrono>         
 #include <cuda.h>
 #include <cub/cub.cuh>
+#include <chrono>         
 #include "absl/container/flat_hash_map.h"
 #define THREAD_N 256
 #define MMULT_N 5
@@ -90,11 +90,11 @@ int main(int argc, char* argv[]) {
 
     uint64_t edge_n, new_edge_n, *w, *z, *d_w,
              *d_z, *d_unique_edge_count, *d_swp,
-             *d_value_node_buffer,max_batch_edge_n,
+             *d_value_node_buffer, max_batch_edge_n,
              batches, *d_edge_buffer; 
 
-    node_t node_n, *edge_start, *edge_end, *z_c,
-           *edge_weight, *d_key_node_buffer,
+    node_t node_n, start_node_n, *edge_start, *edge_end, *z_c,
+           *final_z, *edge_weight, *d_key_node_buffer,
            *d_edge_weight, *d_edge_start,
            *d_edge_end, unique_node_count, new_node_n,
            w_unique_n, z_unique_n, *d_unique_node_count,
@@ -109,23 +109,20 @@ int main(int argc, char* argv[]) {
     CHECK_RESULT( read_graph(&edge_start, &edge_end, &edge_weight, &edge_n, &node_n) );
     max_batch_edge_n = argc == 2 ? atoll(argv[1]) : edge_n; 
 
-    if(max_batch_edge_n < node_n) {
-        printf("The max batch edge number must be greater or equal to the node number!\n");
-        return EXIT_FAILURE;
-    }
-
     CHECK_ALLOC( w = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
     CHECK_ALLOC( z = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
     CHECK_ALLOC( z_c = (node_t*)malloc(sizeof(node_t) * node_n) );
+    CHECK_ALLOC( final_z  = (node_t*)malloc(sizeof(node_t) * node_n) );
     CHECK_ALLOC( batch_mask = (uint8_t*)malloc(sizeof(uint8_t) * node_n) );
 
     CHECK_CUDA( cudaMalloc((void **)&d_batch_mask, node_n * sizeof(uint8_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_edge_start, max_batch_edge_n * sizeof(node_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_edge_end, max_batch_edge_n * sizeof(node_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_edge_weight, max_batch_edge_n * sizeof(node_t)) );
-    CHECK_CUDA( cudaMalloc((void **)&d_edge_buffer, max_batch_edge_n * sizeof(uint64_t)) );
+    CHECK_CUDA( cudaMalloc((void **)&d_edge_buffer, max((uint64_t)node_n, max_batch_edge_n) * sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_key_node_buffer, node_n * sizeof(node_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_value_node_buffer, node_n * sizeof(uint64_t)) );
+
     CHECK_CUDA( cudaMalloc((void **)&d_w, node_n * sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_z, node_n * sizeof(uint64_t)) );
 
@@ -142,7 +139,10 @@ int main(int argc, char* argv[]) {
     max_temp_sizes_bytes = *std::max_element(temp_sizes_bytes, temp_sizes_bytes + 4);
     CHECK_CUDA( cudaMalloc(&d_temp_storage, max_temp_sizes_bytes) );
 
+    for(node_t i=0; i<node_n; ++i) final_z[i] = i;
+
     auto st = std::chrono::steady_clock::now();
+    start_node_n = node_n;
     new_node_n = node_n;
     new_edge_n = edge_n;
     do {
@@ -231,9 +231,11 @@ int main(int argc, char* argv[]) {
             w[i] = edge_n;
         }
 
+        for(node_t i=0; i<start_node_n; ++i) final_z[i] = z_c[final_z[i]];
+
         new_edge_n = 0;
-        uint64_t first_edge_i;
         node_t current_node;
+        uint64_t first_edge_i;
         uint8_t counting;
 
         for(uint64_t i=0; i<edge_n; ++i) {
@@ -260,12 +262,22 @@ int main(int argc, char* argv[]) {
             }
         }
     } while(batches > 1 && node_n > new_node_n);
+        
     auto en = std::chrono::steady_clock::now();
     double time_s = std::chrono::duration_cast<std::chrono::microseconds>(en - st).count() / 1000000.0;
     printf("%f\n", time_s);
     printf("%lu\n", batches == 1);
     printf("%lu\n", new_node_n);
     printf("%lu\n", new_edge_n);
+
+    /*for(uint64_t i = 0; i< new_edge_n; ++i) {
+        printf("%lu %lu %lu\n", edge_start[i], edge_weight[i], edge_end[i]);
+    }*/
+    /*printf("[%u", final_z[0]);
+    for(node_t i = 1; i < start_node_n; ++i) {
+        printf(",%u", final_z[i]);
+    }*/
+    printf("]\n");
     return 0;
 }
 

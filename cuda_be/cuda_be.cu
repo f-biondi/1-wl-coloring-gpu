@@ -89,8 +89,8 @@ int main(int argc, char* argv[]) {
 
     uint64_t edge_n, new_edge_n, *w, *z, *d_w,
              *d_z, *d_unique_edge_count, *d_swp,
-             *d_value_node_buffer, *d_value_node_buffer2,
-             max_batch_edge_n,batches, *d_edge_buffer; 
+             *d_value_node_buffer, max_batch_edge_n,
+             batches, *d_edge_buffer; 
 
     node_t node_n, start_node_n, *edge_start, *edge_end, *z_c,
            *final_z, *edge_weight, *d_key_node_buffer,
@@ -118,15 +118,9 @@ int main(int argc, char* argv[]) {
     CHECK_CUDA( cudaMalloc((void **)&d_edge_start, max_batch_edge_n * sizeof(node_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_edge_end, max_batch_edge_n * sizeof(node_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_edge_weight, max_batch_edge_n * sizeof(node_t)) );
-    CHECK_CUDA( cudaMalloc((void **)&d_edge_buffer, max_batch_edge_n * sizeof(uint64_t)) );
+    CHECK_CUDA( cudaMalloc((void **)&d_edge_buffer, max((uint64_t)node_n, max_batch_edge_n) * sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_key_node_buffer, node_n * sizeof(node_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_value_node_buffer, node_n * sizeof(uint64_t)) );
-
-    if(max_batch_edge_n >= node_n) {
-        d_value_node_buffer2 = d_edge_buffer;        
-    } else {
-        CHECK_CUDA( cudaMalloc((void **)&d_value_node_buffer2, node_n * sizeof(uint64_t)) );
-    }
 
     CHECK_CUDA( cudaMalloc((void **)&d_w, node_n * sizeof(uint64_t)) );
     CHECK_CUDA( cudaMalloc((void **)&d_z, node_n * sizeof(uint64_t)) );
@@ -139,7 +133,7 @@ int main(int argc, char* argv[]) {
     cub::DeviceSelect::Unique(d_temp_storage, temp_sizes_bytes[0], d_edge_start, d_key_node_buffer, d_unique_node_count, max_batch_edge_n);
     cub::DeviceReduce::ReduceByKey(d_temp_storage, temp_sizes_bytes[1], d_edge_start, d_key_node_buffer, d_edge_buffer, d_value_node_buffer, d_unique_node_count, reduction_op, max_batch_edge_n);
     cub::DeviceRadixSort::SortKeys(d_temp_storage, temp_sizes_bytes[2], d_w, d_value_node_buffer, node_n);
-    cub::DeviceSelect::Unique(d_temp_storage, temp_sizes_bytes[3], d_value_node_buffer, d_value_node_buffer2, d_w_unique_n, node_n);
+    cub::DeviceSelect::Unique(d_temp_storage, temp_sizes_bytes[3], d_value_node_buffer, d_edge_buffer, d_w_unique_n, node_n);
 
     max_temp_sizes_bytes = *std::max_element(temp_sizes_bytes, temp_sizes_bytes + 4);
     CHECK_CUDA( cudaMalloc(&d_temp_storage, max_temp_sizes_bytes) );
@@ -206,10 +200,10 @@ int main(int argc, char* argv[]) {
                     }
 
                     cub::DeviceRadixSort::SortKeys(d_temp_storage, max_temp_sizes_bytes, d_w, d_value_node_buffer, node_n);
-                    cub::DeviceSelect::Unique(d_temp_storage, max_temp_sizes_bytes, d_value_node_buffer, d_value_node_buffer2, d_w_unique_n, node_n);
+                    cub::DeviceSelect::Unique(d_temp_storage, max_temp_sizes_bytes, d_value_node_buffer, d_edge_buffer, d_w_unique_n, node_n);
 
                     cub::DeviceRadixSort::SortKeys(d_temp_storage, max_temp_sizes_bytes, d_z, d_value_node_buffer, node_n);
-                    cub::DeviceSelect::Unique(d_temp_storage, max_temp_sizes_bytes, d_value_node_buffer, d_value_node_buffer2, d_z_unique_n, node_n);
+                    cub::DeviceSelect::Unique(d_temp_storage, max_temp_sizes_bytes, d_value_node_buffer, d_edge_buffer, d_z_unique_n, node_n);
 
                     CHECK_CUDA( cudaMemcpy(&w_unique_n, d_w_unique_n, sizeof(node_t), cudaMemcpyDeviceToHost) );
                     CHECK_CUDA( cudaMemcpy(&z_unique_n, d_z_unique_n, sizeof(node_t), cudaMemcpyDeviceToHost) );
