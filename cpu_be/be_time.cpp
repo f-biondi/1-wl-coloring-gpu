@@ -101,6 +101,7 @@ int main(void) {
     auto en = std::chrono::steady_clock::now();
     double time_s = std::chrono::duration_cast<std::chrono::microseconds>(en - st).count() / 1000000.0;
     printf("%f\n", time_s);
+    printf("1\n", time_s);
     printf("%u\n", new_node_n);
     printf("%lu\n", new_edge_n);
 
