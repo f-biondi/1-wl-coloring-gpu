@@ -276,8 +276,8 @@ int main(int argc, char* argv[]) {
     /*printf("[%u", final_z[0]);
     for(node_t i = 1; i < start_node_n; ++i) {
         printf(",%u", final_z[i]);
-    }*/
-    printf("]\n");
+    }
+    printf("]\n");*/
     return 0;
 }
 

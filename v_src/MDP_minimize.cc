@@ -812,13 +812,14 @@ static void minimize(){
   auto en = std::chrono::steady_clock::now();
   double time_s = std::chrono::duration_cast<std::chrono::microseconds>(en - st).count() / 1000000.0;
   printf("%f\n", time_s);
+  printf("1\n");
   printf("%u\n", B.nr_sets);
   printf("%u\n", nr_w_out);
-  printf("[%u", B.sets[1]);
+  /*printf("[%u", B.sets[1]);
   for(unsigned i = 2; i<= nr_states;++i) {
     printf(",%u", B.sets[i]);
   }
-  printf("]\n");
+  printf("]\n");*/
 
   /* Release memory that is not needed any more. */
   B.locs.del();
