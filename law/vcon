@@ -1,14 +1,13 @@
 #!/usr/bin/pypy3
 import os
 from sys import argv
-from tqdm import tqdm
 
 #os.system(f"tunget {argv[1]}")
 #os.system(f"wget biondi.co/graph.txt")
 # <sizes>         ::= nr_states nr_labels nr_l_trans nr_w_trans nr_blocks
 
 with open("graph.txt") as f:
-    with open("graph.txt.1", "w") as f1:
+    with open("vgraph.txt", "w") as f1:
         nodes = int(f.readline()[:-1])
         edges = int(f.readline()[:-1])
         f1.write(f"{nodes} 0 0 {edges} 1\n")
@@ -16,5 +15,3 @@ with open("graph.txt") as f:
         for edge in f:
             start, weight, end = list(map(int,edge.split(" ")))
             f1.write(f"{start + 1} {weight} {end + 1}\n")
-
-os.system("mv graph.txt.1 vgraph.txt")
