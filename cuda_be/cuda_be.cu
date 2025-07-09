@@ -131,7 +131,8 @@ int main(int argc, char* argv[]) {
     CHECK_CUDA( cudaMalloc((void **)&d_z_unique_n, sizeof(node_t)) );
 
     cub::DeviceSelect::Unique(d_temp_storage, temp_sizes_bytes[0], d_edge_start, d_key_node_buffer, d_unique_node_count, max_batch_edge_n);
-    cub::DeviceReduce::ReduceByKey(d_temp_storage, temp_sizes_bytes[1], d_edge_start, d_key_node_buffer, d_edge_buffer, d_value_node_buffer, d_unique_node_count, reduction_op, max_batch_edge_n);
+    cub::DeviceReduce::ReduceByKey(d_temp_storage, temp_sizes_bytes[1], d_edge_start, d_key_node_buffer, d_edge_buffer, d_value_node_buffer,
+            d_unique_node_count, reduction_op, max_batch_edge_n);
     cub::DeviceRadixSort::SortKeys(d_temp_storage, temp_sizes_bytes[2], d_w, d_value_node_buffer, node_n);
     cub::DeviceSelect::Unique(d_temp_storage, temp_sizes_bytes[3], d_value_node_buffer, d_edge_buffer, d_w_unique_n, node_n);
 
