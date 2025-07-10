@@ -10,6 +10,7 @@ use clap::Subcommand;
 use super::GlobalArgs;
 
 pub mod arcs;
+pub mod gdata;
 pub mod arcscuda;
 pub mod arcsvalmari;
 pub mod ascii;
@@ -26,6 +27,7 @@ pub enum SubCommands {
     Endianness(endianness::CliArgs),
     ArcsCuda(arcscuda::CliArgs),
     ArcsValmari(arcsvalmari::CliArgs),
+    Gdata(gdata::CliArgs),
 }
 
 pub fn main(global_args: GlobalArgs, subcommand: SubCommands) -> Result<()> {
@@ -36,5 +38,6 @@ pub fn main(global_args: GlobalArgs, subcommand: SubCommands) -> Result<()> {
         SubCommands::Endianness(args) => endianness::main(global_args, args),
         SubCommands::ArcsCuda(args) => arcscuda::main(global_args, args),
         SubCommands::ArcsValmari(args) => arcsvalmari::main(global_args, args),
+        SubCommands::Gdata(args) => gdata::main(global_args, args),
     }
 }

@@ -4,6 +4,7 @@
 #include "absl/container/flat_hash_map.h"
 #define MMULT_N 5
 #define WEIGHT_MAX UINT32_MAX
+#define TIME_LIMIT 3600
 
 #define CHECK_ALLOC(p)                                                         \
 {                                                                              \
@@ -40,6 +41,7 @@ uint64_t read_uint64();
 int main(void) {
     node_t node_n = 0, new_node_n = 0, *edge_start, *edge_end, *edge_weight, *z_c;
     uint64_t *swp, *w, *z, edge_n = 0;
+    uint8_t status = 1;
 
     CHECK_RESULT( read_graph(&edge_start, &edge_end, &edge_weight, &edge_n, &node_n) );
     CHECK_ALLOC( w = (uint64_t*)malloc(sizeof(uint64_t) * node_n) );
@@ -60,40 +62,47 @@ int main(void) {
             z = swp;
             randomize(w, node_n);
         }
-        if(is_equivalent(w, z, z_c, node_n, &new_node_n))
+        auto enit = std::chrono::steady_clock::now();
+        double time_it_s = std::chrono::duration_cast<std::chrono::microseconds>(enit - st).count() / 1000000.0;
+        if(is_equivalent(w, z, z_c, node_n, &new_node_n)) {
             break;
+        } else if(time_it_s >= TIME_LIMIT) {
+            status = 0;
+            break;
+        }
     }
 
     uint64_t new_edge_n = 0;
     uint64_t first_edge_i;
     node_t current_node;
     uint8_t counting;
-
-    for(node_t i = 0; i<new_node_n; ++i) { 
-        z[i] = 0;
-        w[i] = edge_n;
-    }
-
-    for(uint64_t i=0; i<edge_n; ++i) {
-        if(!i || edge_start[i] != current_node) {
-            current_node = edge_start[i];
-            counting = !z[z_c[edge_start[i]]];
-            first_edge_i = new_edge_n;
-            z[z_c[edge_start[i]]] = 1;
+    if (status) {
+        for(node_t i = 0; i<new_node_n; ++i) { 
+            z[i] = 0;
+            w[i] = edge_n;
         }
-        
-        if(counting) {
-            edge_start[i] = z_c[edge_start[i]];
-            edge_end[i] = z_c[edge_end[i]];
 
-            if(w[edge_end[i]] == edge_n || w[edge_end[i]] < first_edge_i) {
-                edge_start[new_edge_n] = edge_start[i];
-                edge_end[new_edge_n] = edge_end[i];
-                edge_weight[new_edge_n] = edge_weight[i];
-                w[edge_end[i]] = new_edge_n;
-                ++new_edge_n;
-            } else {
-                edge_weight[w[edge_end[i]]] += edge_weight[i];
+        for(uint64_t i=0; i<edge_n; ++i) {
+            if(!i || edge_start[i] != current_node) {
+                current_node = edge_start[i];
+                counting = !z[z_c[edge_start[i]]];
+                first_edge_i = new_edge_n;
+                z[z_c[edge_start[i]]] = 1;
+            }
+            
+            if(counting) {
+                edge_start[i] = z_c[edge_start[i]];
+                edge_end[i] = z_c[edge_end[i]];
+
+                if(w[edge_end[i]] == edge_n || w[edge_end[i]] < first_edge_i) {
+                    edge_start[new_edge_n] = edge_start[i];
+                    edge_end[new_edge_n] = edge_end[i];
+                    edge_weight[new_edge_n] = edge_weight[i];
+                    w[edge_end[i]] = new_edge_n;
+                    ++new_edge_n;
+                } else {
+                    edge_weight[w[edge_end[i]]] += edge_weight[i];
+                }
             }
         }
     }
@@ -101,7 +110,7 @@ int main(void) {
     auto en = std::chrono::steady_clock::now();
     double time_s = std::chrono::duration_cast<std::chrono::microseconds>(en - st).count() / 1000000.0;
     printf("%f\n", time_s);
-    printf("1\n", time_s);
+    printf("%u\n", status);
     printf("%u\n", new_node_n);
     printf("%lu\n", new_edge_n);
 
