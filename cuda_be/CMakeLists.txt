@@ -21,3 +21,8 @@ target_link_libraries(cuda_be_multi absl::flat_hash_map)
 set_target_properties(cuda_be_multi PROPERTIES CUDA_ARCHITECTURES "80;86")
 target_link_libraries(cuda_be_time absl::flat_hash_map)
 set_target_properties(cuda_be_time PROPERTIES CUDA_ARCHITECTURES "80;86")
+
+find_package(OpenMP REQUIRED)
+if (OPENMP_FOUND)
+  set (CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} ${OpenMP_CXX_FLAGS}")
+endif()
