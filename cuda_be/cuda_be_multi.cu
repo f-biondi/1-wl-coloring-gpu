@@ -199,12 +199,12 @@ int main(int argc, char* argv[]) {
         #pragma omp parallel for num_threads(max_gpus)
         for(uint64_t gpu = 0; gpu<max_gpus; ++gpu) {
             printf("GPU: %d\n", gpu);
+            cudaStream_t stream = streams[gpu];
+            cudaSetDevice(gpu);
             uint64_t gpu_start_batch = gpu * batches_per_gpu;
             uint64_t gpu_end_batch = min(batches, gpu_start_batch + batches_per_gpu);
-            for(uint64_t batch = gpu_start_batch; batch<gpu_end_batch; ++batch) {  
-                cudaStream_t stream = streams[gpu];
-                cudaSetDevice(gpu);
 
+            for(uint64_t batch = gpu_start_batch; batch<gpu_end_batch; ++batch) {  
                 uint64_t batch_start = max_batch_edge_n * batch;
                 uint64_t batch_end = min(edge_n, batch_start + max_batch_edge_n);
                 uint64_t batch_edge_n = batch_end - batch_start;
