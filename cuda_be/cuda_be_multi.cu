@@ -21,6 +21,15 @@
     }                                                                          \
 }
 
+#define CHECK_CUDA_LOG(func)                                                       \
+{                                                                              \
+    cudaError_t status = (func);                                               \
+    if (status != cudaSuccess) {                                               \
+        printf("CUDA API failed at line %d with error: %s (%d)\n",             \
+               __LINE__, cudaGetErrorString(status), status);                  \
+    }                                                                          \
+}
+
 #define CHECK_ALLOC(p)                                                         \
 {                                                                              \
     if (!(p)) {                                                                \
@@ -47,7 +56,7 @@
 using absl::flat_hash_map;
 typedef uint32_t node_t;
 
-int is_equivalent(uint64_t* w, uint64_t* z, node_t* z_c, uint8_t* batch_mask, node_t* new_node_n, node_t node_n);
+int is_equivalent(uint64_t* w, uint64_t* z, node_t* z_c, uint8_t* batch_mask, node_t node_n);
 int read_graph(node_t** edge_start, node_t** edge_end, node_t** edge_weight, uint64_t* edge_n, node_t* node_n);
 uint64_t read_uint64();
 
@@ -97,7 +106,7 @@ int main(int argc, char* argv[]) {
     node_t node_n, start_node_n, *edge_start, *edge_end, *z_c,
            *final_z, *edge_weight, **d_key_node_buffer,
            **d_edge_weight, **d_edge_start,
-           **d_edge_end, *unique_node_count, *current_new_node_n, new_node_n,
+           **d_edge_end, *unique_node_count, new_node_n,
            *w_unique_n, *z_unique_n, **d_unique_node_count,
            **d_w_unique_n, **d_z_unique_n;
 
@@ -110,12 +119,10 @@ int main(int argc, char* argv[]) {
     CHECK_RESULT( read_graph(&edge_start, &edge_end, &edge_weight, &edge_n, &node_n) );
     max_batch_edge_n = argc >= 2 ? atoll(argv[1]) : edge_n; 
     max_gpus = argc == 3 ? atoll(argv[2]) : 1; 
-    printf("MAX GPUS: %lu\n", max_gpus);
 
     CHECK_ALLOC( w = (uint64_t*)malloc(sizeof(uint64_t) * node_n * max_gpus) );
     CHECK_ALLOC( z = (uint64_t*)malloc(sizeof(uint64_t) * node_n * max_gpus) );
     CHECK_ALLOC( z_c = (node_t*)malloc(sizeof(node_t) * node_n) );
-    CHECK_ALLOC( current_new_node_n = (node_t*)malloc(sizeof(node_t) * max_gpus) );
     CHECK_ALLOC( final_z  = (node_t*)malloc(sizeof(node_t) * node_n) );
     CHECK_ALLOC( batch_mask = (uint8_t*)malloc(sizeof(uint8_t) * node_n * max_gpus) );
     CHECK_ALLOC( max_temp_sizes_bytes = (size_t*)malloc(sizeof(size_t) * max_gpus) );
@@ -190,105 +197,117 @@ int main(int argc, char* argv[]) {
         node_n = new_node_n;
         new_node_n = 0;
         for(node_t i=0; i<node_n; ++i) z_c[i] = node_n;
-        for(node_t i=0; i<max_gpus; ++i) current_new_node_n[i] = 0;
         batches = ceil(edge_n / (float)max_batch_edge_n);
 
-        #pragma omp parallel for num_threads(max_gpus)
-        for(uint64_t batch = 0; batch<batches; ++batch) {  
-            int gpu = omp_get_thread_num();
-            cudaStream_t stream;
-            cudaStreamCreate(&stream);
+        uint64_t i, gpu,  batch, batch_start, batch_end, batch_edge_n, *current_w, *current_z;
+        cudaStream_t stream;
+        uint8_t* current_batch_mask;
 
-            cudaSetDevice(gpu);
-            uint64_t batch_start = max_batch_edge_n * batch;
-            uint64_t batch_end = min(edge_n, batch_start + max_batch_edge_n);
-            uint64_t batch_edge_n = batch_end - batch_start;
+        #pragma omp parallel num_threads(max_gpus) private(i, stream, gpu, batch, batch_start, batch_end, batch_edge_n, current_batch_mask, current_w, current_z) 
+        {
+            gpu = omp_get_thread_num();
+            CHECK_CUDA_LOG( cudaSetDevice(gpu) );
+            CHECK_CUDA_LOG( cudaStreamCreate(&stream) );
 
-            uint8_t* current_batch_mask = batch_mask + (node_n * gpu);
-            for(node_t i=0; i<node_n; ++i) {
-                current_batch_mask[i] = !batch ? 1 : 0;
-            }
+            #pragma omp for
+            for(batch = 0; batch<batches; ++batch) {  
+                batch_start = max_batch_edge_n * batch;
+                batch_end = min(edge_n, batch_start + max_batch_edge_n);
+                batch_edge_n = batch_end - batch_start;
 
-            for(uint64_t i=batch_start; i<batch_end; ++i) {
-                current_batch_mask[edge_start[i]] = 1;
-            }
-
-            for(uint64_t i=0; i<batch_start; ++i) {
-                current_batch_mask[edge_start[i]] = 0;
-            }
-
-            for(uint64_t i=batch_end; i<edge_n; ++i) {
-                current_batch_mask[edge_start[i]] = 0;
-            }
-
-            cudaMemcpyAsync(d_edge_start[gpu], edge_start + batch_start, batch_edge_n * sizeof(node_t), cudaMemcpyHostToDevice, stream);
-            cudaMemcpyAsync(d_edge_end[gpu], edge_end + batch_start, batch_edge_n * sizeof(node_t), cudaMemcpyHostToDevice, stream);
-            cudaMemcpyAsync(d_edge_weight[gpu], edge_weight + batch_start, batch_edge_n * sizeof(node_t), cudaMemcpyHostToDevice, stream);
-            cudaMemcpyAsync(d_batch_mask[gpu], current_batch_mask, node_n * sizeof(uint8_t), cudaMemcpyHostToDevice, stream);
-            cudaStreamSynchronize(stream);
-
-            cub::DeviceSelect::Unique(d_temp_storage[gpu], max_temp_sizes_bytes[gpu], d_edge_start[gpu], d_key_node_buffer[gpu], d_unique_node_count[gpu], batch_edge_n, stream);
-
-
-            cudaMemcpyAsync(&unique_node_count[gpu], d_unique_node_count[gpu], sizeof(node_t), cudaMemcpyDeviceToHost, stream);
-            cudaStreamSynchronize(stream);
-
-            printf("gpu: %lu test: %lu\n", gpu, unique_node_count[gpu]);
-            init_partition<<<(node_n+(THREAD_N-1)) / THREAD_N, THREAD_N, 0, stream>>>(node_n, d_batch_mask[gpu], d_w[gpu],gpu);
-
-            while(1) {
-                while(1) {
-                    for(int i=0; i < MMULT_N; ++i) {
-                        init_partition<<<(node_n+(THREAD_N-1)) / THREAD_N, THREAD_N, 0, stream>>>(node_n, d_batch_mask[gpu], d_z[gpu],gpu);
-                        set_values<<<(batch_edge_n+(THREAD_N-1)) / THREAD_N, THREAD_N, 0, stream>>>(batch_edge_n, d_edge_weight[gpu], d_edge_end[gpu], d_edge_buffer[gpu], d_w[gpu]);
-
-                        cub::DeviceReduce::ReduceByKey(
-                          d_temp_storage[gpu], max_temp_sizes_bytes[gpu],
-                          d_edge_start[gpu], d_key_node_buffer[gpu], d_edge_buffer[gpu],
-                          d_value_node_buffer[gpu], d_unique_node_count[gpu], reduction_op, batch_edge_n, stream);
-
-                        set_partition<<<(unique_node_count[gpu]+(THREAD_N-1)) / THREAD_N, THREAD_N, 0, stream>>>(unique_node_count[gpu], d_batch_mask[gpu], d_z[gpu], d_value_node_buffer[gpu], d_key_node_buffer[gpu]); 
-
-                        randomize<<<(node_n+(THREAD_N-1)) / THREAD_N, THREAD_N, 0, stream>>>(node_n, d_z[gpu]);
-
-                        d_swp[gpu] = d_z[gpu];
-                        d_z[gpu] = d_w[gpu];
-                        d_w[gpu] = d_swp[gpu];
-                    }
-
-                    cub::DeviceRadixSort::SortKeys(d_temp_storage[gpu], max_temp_sizes_bytes[gpu], d_w[gpu], d_value_node_buffer[gpu], node_n, 0, sizeof(uint64_t) * 8, stream);
-
-                    cub::DeviceSelect::Unique(d_temp_storage[gpu], max_temp_sizes_bytes[gpu], d_value_node_buffer[gpu], d_edge_buffer[gpu], d_w_unique_n[gpu], node_n, stream);
-
-                    cub::DeviceRadixSort::SortKeys(d_temp_storage[gpu], max_temp_sizes_bytes[gpu], d_z[gpu], d_value_node_buffer[gpu], node_n, 0, sizeof(uint64_t) * 8, stream);
-
-                    cub::DeviceSelect::Unique(d_temp_storage[gpu], max_temp_sizes_bytes[gpu], d_value_node_buffer[gpu], d_edge_buffer[gpu], d_z_unique_n[gpu], node_n, stream);
-
-                    cudaStreamSynchronize(stream);
-                    cudaMemcpyAsync(&w_unique_n[gpu], d_w_unique_n[gpu], sizeof(node_t), cudaMemcpyDeviceToHost, stream);
-                    cudaMemcpyAsync(&z_unique_n[gpu], d_z_unique_n[gpu], sizeof(node_t), cudaMemcpyDeviceToHost, stream);
-                    cudaStreamSynchronize(stream);
-
-                    if(w_unique_n[gpu] == z_unique_n[gpu])
-                        break;
+                current_batch_mask = batch_mask + (node_n * gpu);
+                for(i=0; i<node_n; ++i) {
+                    current_batch_mask[i] = !batch ? 1 : 0;
                 }
 
-                uint64_t* current_w = w + (node_n * gpu);
-                uint64_t* current_z = z + (node_n * gpu);
+                for(i=batch_start; i<batch_end; ++i) {
+                    current_batch_mask[edge_start[i]] = 1;
+                }
 
-                cudaMemcpyAsync(current_w, d_w[gpu], node_n * sizeof(uint64_t), cudaMemcpyDeviceToHost, stream);
-                cudaMemcpyAsync(current_z, d_z[gpu], node_n * sizeof(uint64_t), cudaMemcpyDeviceToHost, stream);
+                for(i=0; i<batch_start; ++i) {
+                    current_batch_mask[edge_start[i]] = 0;
+                }
+
+                for(i=batch_end; i<edge_n; ++i) {
+                    current_batch_mask[edge_start[i]] = 0;
+                }
+
+                cudaMemcpyAsync(d_edge_start[gpu], edge_start + batch_start, batch_edge_n * sizeof(node_t), cudaMemcpyHostToDevice, stream);
+                cudaMemcpyAsync(d_edge_end[gpu], edge_end + batch_start, batch_edge_n * sizeof(node_t), cudaMemcpyHostToDevice, stream);
+                cudaMemcpyAsync(d_edge_weight[gpu], edge_weight + batch_start, batch_edge_n * sizeof(node_t), cudaMemcpyHostToDevice, stream);
+                cudaMemcpyAsync(d_batch_mask[gpu], current_batch_mask, node_n * sizeof(uint8_t), cudaMemcpyHostToDevice, stream);
                 cudaStreamSynchronize(stream);
 
-                if(is_equivalent(current_w, current_z, z_c, current_batch_mask, &current_new_node_n[gpu], node_n)) {
-                    cudaStreamDestroy(stream);
-                    break;
+                cub::DeviceSelect::Unique(d_temp_storage[gpu], max_temp_sizes_bytes[gpu], d_edge_start[gpu], d_key_node_buffer[gpu], d_unique_node_count[gpu], batch_edge_n, stream);
+
+                cudaMemcpyAsync(&unique_node_count[gpu], d_unique_node_count[gpu], sizeof(node_t), cudaMemcpyDeviceToHost, stream);
+                cudaStreamSynchronize(stream);
+
+                init_partition<<<(node_n+(THREAD_N-1)) / THREAD_N, THREAD_N, 0, stream>>>(node_n, d_batch_mask[gpu], d_w[gpu],gpu);
+
+                while(1) {
+                    while(1) {
+                        for(i=0; i < MMULT_N; ++i) {
+                            init_partition<<<(node_n+(THREAD_N-1)) / THREAD_N, THREAD_N, 0, stream>>>(node_n, d_batch_mask[gpu], d_z[gpu],gpu);
+                            set_values<<<(batch_edge_n+(THREAD_N-1)) / THREAD_N, THREAD_N, 0, stream>>>(batch_edge_n, d_edge_weight[gpu], d_edge_end[gpu], d_edge_buffer[gpu], d_w[gpu]);
+
+                            cub::DeviceReduce::ReduceByKey(
+                              d_temp_storage[gpu], max_temp_sizes_bytes[gpu],
+                              d_edge_start[gpu], d_key_node_buffer[gpu], d_edge_buffer[gpu],
+                              d_value_node_buffer[gpu], d_unique_node_count[gpu], reduction_op, batch_edge_n, stream);
+
+                            set_partition<<<(unique_node_count[gpu]+(THREAD_N-1)) / THREAD_N, THREAD_N, 0, stream>>>(unique_node_count[gpu], d_batch_mask[gpu], d_z[gpu], d_value_node_buffer[gpu], d_key_node_buffer[gpu]); 
+
+                            randomize<<<(node_n+(THREAD_N-1)) / THREAD_N, THREAD_N, 0, stream>>>(node_n, d_z[gpu]);
+
+                            d_swp[gpu] = d_z[gpu];
+                            d_z[gpu] = d_w[gpu];
+                            d_w[gpu] = d_swp[gpu];
+                        }
+
+                        cub::DeviceRadixSort::SortKeys(d_temp_storage[gpu], max_temp_sizes_bytes[gpu], d_w[gpu], d_value_node_buffer[gpu], node_n, 0, sizeof(uint64_t) * 8, stream);
+
+                        cub::DeviceSelect::Unique(d_temp_storage[gpu], max_temp_sizes_bytes[gpu], d_value_node_buffer[gpu], d_edge_buffer[gpu], d_w_unique_n[gpu], node_n, stream);
+
+                        cub::DeviceRadixSort::SortKeys(d_temp_storage[gpu], max_temp_sizes_bytes[gpu], d_z[gpu], d_value_node_buffer[gpu], node_n, 0, sizeof(uint64_t) * 8, stream);
+
+                        cub::DeviceSelect::Unique(d_temp_storage[gpu], max_temp_sizes_bytes[gpu], d_value_node_buffer[gpu], d_edge_buffer[gpu], d_z_unique_n[gpu], node_n, stream);
+
+                        cudaMemcpyAsync(&w_unique_n[gpu], d_w_unique_n[gpu], sizeof(node_t), cudaMemcpyDeviceToHost, stream);
+                        cudaMemcpyAsync(&z_unique_n[gpu], d_z_unique_n[gpu], sizeof(node_t), cudaMemcpyDeviceToHost, stream);
+                        cudaStreamSynchronize(stream);
+
+                        if(w_unique_n[gpu] == z_unique_n[gpu])
+                            break;
+                    }
+
+                    current_w = w + (node_n * gpu);
+                    current_z = z + (node_n * gpu);
+
+                    cudaMemcpyAsync(current_w, d_w[gpu], node_n * sizeof(uint64_t), cudaMemcpyDeviceToHost, stream);
+                    cudaMemcpyAsync(current_z, d_z[gpu], node_n * sizeof(uint64_t), cudaMemcpyDeviceToHost, stream);
+                    cudaStreamSynchronize(stream);
+
+                    if(is_equivalent(current_w, current_z, z_c, current_batch_mask, node_n)) {
+                        for(i=0; i<node_n; ++i) current_w[i] = node_n;
+                        for(i=0; i<node_n; ++i) {
+                            if(current_batch_mask[i]) {
+                                if(current_w[z_c[i]] == node_n) {
+                                    #pragma omp critical 
+                                    {
+                                        current_w[z_c[i]] = new_node_n++;
+                                    }
+                                }
+                                z_c[i] = current_w[z_c[i]];
+                            }
+                        }
+                        break;
+                    }
                 }
             }
+            cudaStreamDestroy(stream);
+            cudaDeviceSynchronize();
         }
-        cudaDeviceSynchronize();
-
-        for(node_t i=0; i<max_gpus; ++i) new_node_n += current_new_node_n[i];
 
         for(node_t i=0; i<node_n; ++i) {
             if(z_c[i] == node_n) { 
@@ -349,7 +368,7 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-int is_equivalent(uint64_t* w, uint64_t* z, node_t* z_c, uint8_t* batch_mask, node_t* new_node_n, node_t node_n) {
+int is_equivalent(uint64_t* w, uint64_t* z, node_t* z_c, uint8_t* batch_mask, node_t node_n) {
     flat_hash_map<uint64_t, node_t> w_unordered_map;
     node_t w_seen = 1;
     flat_hash_map<uint64_t, node_t> z_unordered_map;
@@ -357,7 +376,7 @@ int is_equivalent(uint64_t* w, uint64_t* z, node_t* z_c, uint8_t* batch_mask, no
     w_unordered_map.reserve(node_n);
     z_unordered_map.reserve(node_n);
     node_t z_current_c;
-    node_t start_new_node_n = *new_node_n;
+    node_t new_node_n = 0;
 
     for(node_t i=0; i<node_n; ++i) {
         uint64_t w_val = w[i];
@@ -372,7 +391,7 @@ int is_equivalent(uint64_t* w, uint64_t* z, node_t* z_c, uint8_t* batch_mask, no
                 z_unordered_map[z_val] = z_seen;
                 z_current_c = z_seen;
             } else {
-                z_current_c = ++(*new_node_n);
+                z_current_c = ++new_node_n;
                 z_unordered_map[z_val] = z_current_c;
             }
             ++z_seen;
@@ -382,7 +401,6 @@ int is_equivalent(uint64_t* w, uint64_t* z, node_t* z_c, uint8_t* batch_mask, no
         }
 
         if(w_seen != z_seen) {
-            *new_node_n = start_new_node_n;
             return 0;
         }
     }
