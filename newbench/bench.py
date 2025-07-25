@@ -63,7 +63,7 @@ if __name__ == "__main__":
     con = sqlite3.connect("bench.db")
     con.row_factory = sqlite3.Row
     cur = con.cursor()
-    cur.execute('select * from results where status = 0 order by nodes')
+    cur.execute('select * from results where status = 0 order by edges')
     result = cur.fetchall()
 
     for rc in tqdm(result):
