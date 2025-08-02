@@ -7,7 +7,7 @@ from sys import argv
 CUDA_COMMAND = "{inp} | timeout 1800 ./batched_be {edges} {gpu}" 
 CPU_COMMAND = "{inp} | timeout 1800 ./random_be" 
 VALMARI_COMMAND = "{inp} | timeout 1800 ./part_ref" 
-INPUT_LAW = "./webgraph to {fmt} {name}/{name}.graph 2>/dev/null"
+INPUT_LAW = "./webgraph to {fmt} {name}/{name}.graph"
 INPUT_FILE = "{cmd} ./datasets/{name}.txt"
 
 class Result():
@@ -31,7 +31,7 @@ def gdata_file(name):
 
 def gdata_law(name):
     res = Gdata()
-    os.system(f"./download.sh {name} 2>/dev/null")
+    os.system(f"./download.sh {name}")
     gdata_txt = subprocess.run([INPUT_LAW.format(fmt="gdata", name=name)], stdout=subprocess.PIPE, shell=True).stdout.decode()
     gdata_txt = gdata_txt.split("\n")[:-1]
     res.nodes = int(gdata_txt[0])
