@@ -1,15 +1,14 @@
 import json
 import subprocess
 import sqlite3
-from tqdm import tqdm
 import os
+from sys import argv
 
-CUDA_COMMAND = "{inp} | ./cuda_be_time {edges}" 
-CPU_COMMAND = "{inp} | ./be_time" 
-VALMARI_COMMAND = "{inp} | ./valmari" 
+CUDA_COMMAND = "{inp} | timeout 1800 ./batched_be {edges} {gpu}" 
+CPU_COMMAND = "{inp} | timeout 1800 ./random_be" 
+VALMARI_COMMAND = "{inp} | timeout 1800 ./part_ref" 
 INPUT_LAW = "./webgraph to {fmt} {name}/{name}.graph 2>/dev/null"
 INPUT_FILE = "{cmd} ./datasets/{name}.txt"
-TIME_LIMIT = 3600
 
 class Result():
     def __init__(self, done=0, nodes=0, edges=0, time=0):
@@ -39,23 +38,22 @@ def gdata_law(name):
     res.edges = int(gdata_txt[1])
     return res
 
-def experiment(command, runs=5):
+def experiment(command, runs=1):
     res = Result()
-    tqdm.write(command)
-    for _ in tqdm(range(runs)):
+    print(command)
+    for _ in range(runs):
         res_txt = subprocess.run([command], stdout=subprocess.PIPE, shell=True).stdout.decode()
-        res_txt = res_txt.split("\n")[:-1]
-        current_time = float(res_txt[0])
-        if current_time >= TIME_LIMIT:
-            tqdm.write("TIMEOUT")
-            res.time = current_time
-            res.done = 0
-            return res
-        else:
+        try:
+            res_txt = res_txt.split("\n")[:-1]
+            current_time = float(res_txt[0])
             res.time += current_time 
             res.done = int(res_txt[1])
             res.nodes = int(res_txt[2])
             res.edges = int(res_txt[3])
+        except:
+            res.time = 1800
+            res.done = 0
+            return res
     res.time /= runs
     return res
 
@@ -63,10 +61,11 @@ if __name__ == "__main__":
     con = sqlite3.connect("bench.db")
     con.row_factory = sqlite3.Row
     cur = con.cursor()
+    gpu = int(argv[1])
     cur.execute('select * from results where status = 0 order by edges')
     result = cur.fetchall()
 
-    for rc in tqdm(result):
+    for rc in result:
         try:
             gdata = gdata_file(rc["name"]) if rc["tool"] == "file" else gdata_law(rc["name"])
             valmari_res = experiment(
@@ -82,25 +81,29 @@ if __name__ == "__main__":
             cuda_res = experiment(
                 CUDA_COMMAND.format(
                     inp = INPUT_FILE.format(name=rc["name"], cmd="cat") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-cuda"),
-                    edges = str(gdata.edges)
+                    edges = str(gdata.edges),
+                    gpu = gpu
                 )
             )
             cuda_75_res = experiment(
                 CUDA_COMMAND.format(
                     inp = INPUT_FILE.format(name=rc["name"], cmd="cat") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-cuda"),
-                    edges = str(int(gdata.edges * 0.75))
+                    edges = str(int(gdata.edges * 0.75)),
+                    gpu = gpu
                 )
             )
             cuda_50_res = experiment(
                 CUDA_COMMAND.format(
                     inp = INPUT_FILE.format(name=rc["name"], cmd="cat") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-cuda"),
-                    edges = str(int(gdata.edges * 0.50))
+                    edges = str(int(gdata.edges * 0.50)),
+                    gpu = gpu
                 )
             )
             cuda_25_res = experiment(
                 CUDA_COMMAND.format(
                     inp = INPUT_FILE.format(name=rc["name"], cmd="cat") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-cuda"),
-                    edges = str(int(gdata.edges * 0.25))
+                    edges = str(int(gdata.edges * 0.25)),
+                    gpu = gpu
                 )
             )
             #│      name      │ tool │ nodes │ edges │ valmari │ cpu │ cuda │ cuda_75 │ cuda_50 │ cuda_25 │ status │
@@ -118,7 +121,7 @@ if __name__ == "__main__":
             ))
             con.commit()
         except Exception as e:
-            tqdm.write(f"FAIL: {e}")
+            print(f"FAIL: {e}")
             cur.execute("UPDATE results SET status=? WHERE name=?", (-1, rc['name']))
             con.commit()
 
