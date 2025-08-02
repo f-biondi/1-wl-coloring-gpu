@@ -25,3 +25,7 @@ cd webgraph-rs
 cargo build --release
 cd ..
 mv webgraph-rs/target/release/webgraph .
+
+cd datasets
+wget https://biondi.co/pytorch.tar.gz
+tar -xvf pytorch.tar.gz
