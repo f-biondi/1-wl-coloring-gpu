@@ -42,7 +42,7 @@ times will be saved in the results table of `benchlarge.db` sqlite3 database. Ea
 - **nodes** number of nodes of the dataset
 - **edges** number of edges of the dataset
 - **cpu** result of the RandomBE CPU implementation
-- **valmari** result of the partition refinement cpu implementation
+- **valmari** result of the partition refinement CPU implementation
 - **cuda** result of the GPU BatchedBE implementation with a batch size of 1.8 billion edges
 - **status** has a value of 1 if all the experiments on this dataset have been completed
 
