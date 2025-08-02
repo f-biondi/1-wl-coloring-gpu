@@ -1,5 +1,5 @@
 # Efficient External 1-WL Coloring via GPU Acceleration
-Tests code for the paper "Efficient External 1-WL Coloring via GPU Acceleration". PyTorch datasets are not present for space limitations while datasets from the LAW collection are downloaded by the test scripts.
+Tests code for the paper "Efficient External 1-WL Coloring via GPU Acceleration". PyTorch datasets are not present for space limitations while datasets from the LAW collection are downloaded at runtime by the test scripts.
 
 # Requirements
 - CUDA version >= 12
