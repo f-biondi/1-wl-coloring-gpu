@@ -35,7 +35,7 @@ results for each of the implementations is saved as a JSON object having the fol
   
 # Running large scale tests
 Run `python3 benchlarge.py number_of_gpus_to_be_used`  
-times will be saved in the results table of `benchlarge.db` sqlite3 database. Each row corresponds to one dataset and have the following fields:
+experiment times will be saved in the results table of `benchlarge.db` sqlite3 database. Each row corresponds to one dataset and have the following fields:
 
 - **name** name of the dataset
 - **tool** name of the tool to use for the decompression of the dataset
