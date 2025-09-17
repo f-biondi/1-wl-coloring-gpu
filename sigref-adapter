@@ -1,0 +1,12 @@
+#!/usr/bin/python3
+from sys import stdin
+
+out = ""
+for line in stdin:
+    out = out + line
+time = out.split("Time for computing the bisimulation relation: ")[1].split(" sec")[0]
+nodes = out.split("Number of blocks after bisimulation minimisation: ")[1].split(".")[0]
+print(time)
+print(1)
+print(nodes)
+print(0)

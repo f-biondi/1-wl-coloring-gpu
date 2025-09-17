@@ -4,11 +4,14 @@ import sqlite3
 import os
 from sys import argv
 
-CUDA_COMMAND = "{inp} | timeout 1800 ./batched_be {edges} {gpu}" 
-CPU_COMMAND = "{inp} | timeout 1800 ./random_be" 
-VALMARI_COMMAND = "{inp} | timeout 1800 ./part_ref" 
+TIMEOUT = 3600
 INPUT_LAW = "./webgraph to {fmt} {name}/{name}.graph"
 INPUT_FILE = "{cmd} ./datasets/{name}.txt"
+CUDA_COMMAND = "{inp} | timeout {TIMEOUT} ./batched_be {edges} {gpu}" 
+CPU_COMMAND = "{inp} | timeout {TIMEOUT} ./random_be" 
+VALMARI_COMMAND = "{inp} | timeout {TIMEOUT} ./part_ref" 
+SIGREF_COMMAND = "timeout {TIMEOUT} ./sigrefmc --workers={workers} mc-models/{name}.xctmc | ./sigref-adapter" 
+TORCH_COMMAND = "{inp} | timeout {TIMEOUT} ./tbe" 
 
 class Result():
     def __init__(self, done=0, nodes=0, edges=0, time=0):
@@ -18,25 +21,20 @@ class Result():
         self.time = time
 
 class Gdata():
-    def __init__(self, nodes=0, edges=0):
-        self.nodes = nodes
-        self.edges = edges
+    def __init__(self, rc):
+        self.name = rc["name"]
+        self.nodes = rc["nodes"]
+        self.edges = rc["edges"]
+        self.tool = rc["tool"]
+        self.small = bool(rc["small"])
+        if self.tool == "law":
+            os.system(f"./download.sh {name}")
 
-def gdata_file(name):
-    res = Gdata()
-    with open(f"./datasets/{name}.txt","r") as f:
-        res.nodes = int(f.readline()[:-1])
-        res.edges = int(f.readline()[:-1])
-    return res
-
-def gdata_law(name):
-    res = Gdata()
-    os.system(f"./download.sh {name}")
-    gdata_txt = subprocess.run([INPUT_LAW.format(fmt="gdata", name=name)], stdout=subprocess.PIPE, shell=True).stdout.decode()
-    gdata_txt = gdata_txt.split("\n")[:-1]
-    res.nodes = int(gdata_txt[0])
-    res.edges = int(gdata_txt[1])
-    return res
+    def input_command(self, fmt, cmd):
+        if self.tool == "file":
+            return INPUT_FILE.format(name=self.name, cmd=cmd)
+        else:
+            return INPUT_LAW.format(name=self.name, fmt=fmt)
 
 def experiment(command, runs=1):
     res = Result()
@@ -51,7 +49,7 @@ def experiment(command, runs=1):
             res.nodes = int(res_txt[2])
             res.edges = int(res_txt[3])
         except:
-            res.time = 1800
+            res.time = TIMEOUT
             res.done = 0
             return res
     res.time /= runs
@@ -67,55 +65,63 @@ if __name__ == "__main__":
 
     for rc in result:
         try:
-            gdata = gdata_file(rc["name"]) if rc["tool"] == "file" else gdata_law(rc["name"])
+            gdata = Gdata(rc)
             valmari_res = experiment(
                 VALMARI_COMMAND.format(
-                    inp = INPUT_FILE.format(name=rc["name"], cmd="./vcon") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-valmari")
+                    inp = gdata.input_command("arcs-valmari", "./valmari-adapter")
+                    timeout = TIMEOUT,
                 )
             )
+
             cpu_res = experiment(
                 CPU_COMMAND.format(
-                    inp = INPUT_FILE.format(name=rc["name"], cmd="cat") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-cuda")
+                    inp = gdata.input_command("arcs-cuda", "cat")
+                    timeout = TIMEOUT,
                 )
             )
-            cuda_res = experiment(
-                CUDA_COMMAND.format(
-                    inp = INPUT_FILE.format(name=rc["name"], cmd="cat") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-cuda"),
-                    edges = str(gdata.edges),
-                    gpu = gpu
+
+            cuda = {}
+            for p in [1,0.75,0.50,0.25]:
+                cuda[p] = experiment(
+                    CUDA_COMMAND.format(
+                        inp = gdata.input_command("arcs-cuda", "cat")
+                        timeout = TIMEOUT,
+                        edges = str(int(gdata.edges * p)),
+                        gpu = gpu
+                    )
                 )
-            )
-            cuda_75_res = experiment(
-                CUDA_COMMAND.format(
-                    inp = INPUT_FILE.format(name=rc["name"], cmd="cat") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-cuda"),
-                    edges = str(int(gdata.edges * 0.75)),
-                    gpu = gpu
+
+            sigref = {}
+            for cores in [32, 64]:
+                sigref[cores] = experiment(
+                    SIGREF_COMMAND.format(
+                        timeout = TIMEOUT,
+                        workers = str(cores),
+                        name = gdata.name,
+                    )
+                ) if gdata.small else Result()
+
+            torch_res = experiment(
+                TORCH_COMMAND.format(
+                    inp = gdata.input_command("arcs-cuda", "cat"),
+                    timeout = TIMEOUT,
                 )
-            )
-            cuda_50_res = experiment(
-                CUDA_COMMAND.format(
-                    inp = INPUT_FILE.format(name=rc["name"], cmd="cat") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-cuda"),
-                    edges = str(int(gdata.edges * 0.50)),
-                    gpu = gpu
-                )
-            )
-            cuda_25_res = experiment(
-                CUDA_COMMAND.format(
-                    inp = INPUT_FILE.format(name=rc["name"], cmd="cat") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-cuda"),
-                    edges = str(int(gdata.edges * 0.25)),
-                    gpu = gpu
-                )
-            )
-            #│      name      │ tool │ nodes │ edges │ valmari │ cpu │ cuda │ cuda_75 │ cuda_50 │ cuda_25 │ status │
-            cur.execute("UPDATE results SET nodes=?,edges=?,valmari=?,cpu=?,cuda=?,cuda_75=?,cuda_50=?,cuda_25=?,status=? WHERE name=?", (
+            ) if gdata.small else Result()
+
+
+            #      name      │ tool │ small │  nodes   │   edges    │ valmari │ cpu │ cuda │ cuda_75 │ cuda_50 │ cuda_25 │ mc_32 │ mc_64 │ torch │ status
+            cur.execute("UPDATE results SET nodes=?,edges=?,valmari=?,cpu=?,cuda=?,cuda_75=?,cuda_50=?,cuda_25=?,mc_32=?,mc_64=?,torch=?,status=? WHERE name=?", (
                 gdata.nodes,
                 gdata.edges,
                 json.dumps(valmari_res.__dict__),
                 json.dumps(cpu_res.__dict__),
-                json.dumps(cuda_res.__dict__),
-                json.dumps(cuda_75_res.__dict__),
-                json.dumps(cuda_50_res.__dict__),
-                json.dumps(cuda_25_res.__dict__),
+                json.dumps(cuda[1].__dict__),
+                json.dumps(cuda[0.75].__dict__),
+                json.dumps(cuda[0.50].__dict__),
+                json.dumps(cuda[0.25].__dict__),
+                json.dumps(sigref[32].__dict__),
+                json.dumps(sigref[64].__dict__),
+                json.dumps(torch_res.__dict__),
                 1,
                 rc["name"]
             ))
