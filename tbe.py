@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 from torch_geometric.nn import WLConv
 import torch
 import numpy as np
@@ -28,7 +29,6 @@ def partition_refinement_WL(data, prepartition, iters=float('inf')):
     while True:
         x_new = wl(x, data.edge_index)
         k += 1
-        print(k)
         x_new_norm = normalize_labels(x_new)
         if k==iters or torch.equal(x_norm,x_new_norm):
             return x_new_norm
