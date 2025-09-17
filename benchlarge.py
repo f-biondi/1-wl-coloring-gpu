@@ -68,20 +68,12 @@ if __name__ == "__main__":
     for rc in result:
         try:
             gdata = gdata_file(rc["name"]) if rc["tool"] == "file" else gdata_law(rc["name"])
-            valmari_res = experiment(
-                VALMARI_COMMAND.format(
-                    inp = INPUT_FILE.format(name=rc["name"], cmd="./vcon") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-valmari")
-                )
-            )
-            cpu_res = experiment(
-                CPU_COMMAND.format(
-                    inp = INPUT_FILE.format(name=rc["name"], cmd="cat") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-cuda")
-                )
-            )
+            valmari_res = Result()
+            cpu_res = Result()
             cuda_res = experiment(
                 CUDA_COMMAND.format(
                     inp = INPUT_FILE.format(name=rc["name"], cmd="cat") if rc["tool"] == "file" else INPUT_LAW.format(name=rc["name"], fmt="arcs-cuda"),
-                    edges = 1800000000,
+                    edges = 3600000000,
                     gpu = gpu
                 )
             )
