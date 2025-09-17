@@ -7,11 +7,11 @@ from sys import argv
 TIMEOUT = 3600
 INPUT_LAW = "./webgraph to {fmt} {name}/{name}.graph"
 INPUT_FILE = "{cmd} ./datasets/{name}.txt"
-CUDA_COMMAND = "{inp} | timeout {TIMEOUT} ./batched_be {edges} {gpu}" 
-CPU_COMMAND = "{inp} | timeout {TIMEOUT} ./random_be" 
-VALMARI_COMMAND = "{inp} | timeout {TIMEOUT} ./part_ref" 
-SIGREF_COMMAND = "timeout {TIMEOUT} ./sigrefmc --workers={workers} mc-models/{name}.xctmc | ./sigref-adapter" 
-TORCH_COMMAND = "{inp} | timeout {TIMEOUT} ./tbe" 
+CUDA_COMMAND = "{inp} | timeout {timeout} ./batched_be {edges} {gpu}" 
+CPU_COMMAND = "{inp} | timeout {timeout} ./random_be" 
+VALMARI_COMMAND = "{inp} | timeout {timeout} ./part_ref" 
+SIGREF_COMMAND = "timeout {timeout} ./sigrefmc --workers={workers} mc-models/{name}.xctmc | ./sigref-adapter" 
+TORCH_COMMAND = "{inp} | timeout {timeout} ./tbe" 
 
 class Result():
     def __init__(self, done=0, nodes=0, edges=0, time=0):
@@ -22,13 +22,15 @@ class Result():
 
 class Gdata():
     def __init__(self, rc):
+        #print(dict(zip(rc.keys(), rc)))
+        print(rc["name"])
         self.name = rc["name"]
         self.nodes = rc["nodes"]
         self.edges = rc["edges"]
         self.tool = rc["tool"]
         self.small = bool(rc["small"])
         if self.tool == "law":
-            os.system(f"./download.sh {name}")
+            os.system(f"./download.sh {self.name}")
 
     def input_command(self, fmt, cmd):
         if self.tool == "file":
@@ -66,16 +68,17 @@ if __name__ == "__main__":
     for rc in result:
         try:
             gdata = Gdata(rc)
+            # print(gdata.name)
             valmari_res = experiment(
                 VALMARI_COMMAND.format(
-                    inp = gdata.input_command("arcs-valmari", "./valmari-adapter")
+                    inp = gdata.input_command("arcs-valmari", "./valmari-adapter"),
                     timeout = TIMEOUT,
                 )
             )
 
             cpu_res = experiment(
                 CPU_COMMAND.format(
-                    inp = gdata.input_command("arcs-cuda", "cat")
+                    inp = gdata.input_command("arcs-cuda", "cat"),
                     timeout = TIMEOUT,
                 )
             )
@@ -84,7 +87,7 @@ if __name__ == "__main__":
             for p in [1,0.75,0.50,0.25]:
                 cuda[p] = experiment(
                     CUDA_COMMAND.format(
-                        inp = gdata.input_command("arcs-cuda", "cat")
+                        inp = gdata.input_command("arcs-cuda", "cat"),
                         timeout = TIMEOUT,
                         edges = str(int(gdata.edges * p)),
                         gpu = gpu
@@ -127,7 +130,7 @@ if __name__ == "__main__":
             ))
             con.commit()
         except Exception as e:
-            print(f"FAIL: {e}")
+            print(f"FAIL: {repr(e)}")
             cur.execute("UPDATE results SET status=? WHERE name=?", (-1, rc['name']))
             con.commit()
 
